@@ -9,6 +9,7 @@
 //
 
 import Foundation
+import ImageIO
 
 actor XMPTaggingService {
 
@@ -209,6 +210,21 @@ actor XMPTaggingService {
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true
         )
         try xmp.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// Merge custom tag keywords into a CGImage properties dictionary as IPTC
+    /// Keywords, for embedding in a re-encoded JPEG. Returns the dictionary
+    /// unchanged when there are no tags.
+    nonisolated static func mergingKeywords(
+        _ tagNames: Set<String>,
+        into properties: [CFString: Any]
+    ) -> [CFString: Any] {
+        guard !tagNames.isEmpty else { return properties }
+        var result = properties
+        var iptc = (result[kCGImagePropertyIPTCDictionary] as? [CFString: Any]) ?? [:]
+        iptc[kCGImagePropertyIPTCKeywords] = tagNames.sorted()
+        result[kCGImagePropertyIPTCDictionary] = iptc
+        return result
     }
 
     private static func exportXMP(_ payload: SidecarPayload) -> String {
