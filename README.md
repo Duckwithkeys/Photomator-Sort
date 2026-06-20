@@ -78,24 +78,3 @@ This repository includes helper scripts to compile and bundle the app for distri
    ./create_dmg.sh
    ```
 
----
-
-## Repository & Publishing Guide
-
-To publish this project to GitHub, make sure you configure your repository correctly. Below is a guide on what to include and what to ignore.
-
-### What to Upload (Tracked in Git)
-
-- **Source Code**: All directories containing Swift source code files (`DuckSort/`).
-- **Configuration**: Swift Package Manager manifest (`Package.swift`).
-- **Scripts**: Packaging scripts (`package_app.sh` and `create_dmg.sh`).
-- **Documentation**: This `README.md` and standard repository files (such as `.gitignore` or `LICENSE`).
-
-### What is Ignored (Excluded via `.gitignore`)
-
-We have configured a `.gitignore` file to ensure the following files are **not** uploaded to GitHub:
-- **Build Artifacts**: The Swift PM `.build/` folder and Xcode `build/` or `DerivedData` directories.
-- **User Settings**: Local Xcode user data and workspaces (`.swiftpm/`, `xcuserdata/`, `*.xcuserstate`).
-- **Compiled Binaries**: The final compiled app bundle (`DuckSort.app/` or `PhotomatorSort.app/`) and packaging workspaces (`dmg_workspace/`, `tmp_iconset/`).
-- **Distribution Packages**: The final disk image (`DuckSort.dmg` or `PhotomatorSort.dmg`).
-- **OS Metadata**: Finder metadata (`.DS_Store`).
