@@ -12,21 +12,19 @@ struct ExportRuleEditorView: View {
     @ObservedObject var viewModel: PhotoLibraryViewModel
     @ObservedObject var ruleStore: ExportRuleStore
     @ObservedObject var tagStore: TagStore
-    @Environment(\.dismiss) private var dismiss
-    
+    var onClose: () -> Void = {}
+
     @State private var newRuleName: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Export Routing Rules")
-                    .font(.title2.weight(.semibold))
                 Spacer()
-                Button("Done") {
-                    dismiss()
-                    NSApp.keyWindow?.close()
-                }
-                .keyboardShortcut(.defaultAction)
+                Button("Done", action: onClose)
+                    .keyboardShortcut(.defaultAction)
+                Button("", action: onClose)
+                    .keyboardShortcut(.cancelAction)
+                    .hidden()
             }
             .padding()
 

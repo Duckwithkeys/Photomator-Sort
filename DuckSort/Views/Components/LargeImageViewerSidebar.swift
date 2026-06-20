@@ -202,35 +202,18 @@ struct EdgeBorder: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
         for edge in edges {
-            var x: CGFloat {
-                switch edge {
-                case .top, .bottom, .leading: return rect.minX
-                case .trailing: return rect.maxX - width
-                }
+            let edgeRect: CGRect
+            switch edge {
+            case .top:
+                edgeRect = CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: width)
+            case .bottom:
+                edgeRect = CGRect(x: rect.minX, y: rect.maxY - width, width: rect.width, height: width)
+            case .leading:
+                edgeRect = CGRect(x: rect.minX, y: rect.minY, width: width, height: rect.height)
+            case .trailing:
+                edgeRect = CGRect(x: rect.maxX - width, y: rect.minY, width: width, height: rect.height)
             }
-
-            var y: CGFloat {
-                switch edge {
-                case .top, .leading, .trailing: return rect.minY
-                case .bottom: return rect.maxY - width
-                }
-            }
-
-            var w: CGFloat {
-                switch edge {
-                case .top, .bottom: return rect.width
-                case .leading, .trailing: return width
-                }
-            }
-
-            var h: CGFloat {
-                switch edge {
-                case .top, .bottom: return width
-                case .leading, .trailing: return rect.height
-                }
-            }
-
-            path.addRect(CGRect(x: x, y: y, width: w, height: h))
+            path.addRect(edgeRect)
         }
         return path
     }

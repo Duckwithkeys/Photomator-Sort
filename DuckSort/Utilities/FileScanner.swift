@@ -110,24 +110,89 @@ actor FileScanner {
             }
         }
 
-        // Build PhotoSets by merging sidecars into matching base names.
+        let photoSets = Self.assemble(media: mediaURLsByBaseName, sidecars: sidecars)
+        let total = photoSets.reduce(0) { $0 + $1.allFiles.count }
+
+        return ScanResult(
+            sourceDirectories: [url],
+            photoSets: photoSets,
+            scannedFileCount: total,
+            ignoredFileCount: ignoredFileCount
+        )
+    }
+
+    /// Group a flat list of individual files (e.g. dropped or imported via the
+    /// open panel) into PhotoSets using the same base-name + sidecar logic as a
+    /// recursive directory scan.
+    func scanFiles(_ urls: [URL], jpegOnly: Bool = false) async throws -> ScanResult {
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isPackageKey, .isRegularFileKey]
+
+        var mediaURLsByBaseName: [String: [URL]] = [:]
+        var sidecars: [String: URL] = [:]
+        var ignoredFileCount = 0
+
+        for itemURL in urls {
+            try Task.checkCancellation()
+
+            guard let extensionKind = FileExtension(rawValue: itemURL.pathExtension.lowercased()) else {
+                ignoredFileCount += 1
+                continue
+            }
+
+            let values = try itemURL.resourceValues(forKeys: keys)
+            let baseName = itemURL.deletingPathExtension().lastPathComponent
+            let groupingKey = Self.groupingKey(for: itemURL)
+
+            if FileExtension.imageExtensions.contains(extensionKind),
+               values.isRegularFile == true,
+               !baseName.isEmpty {
+                if jpegOnly && extensionKind != .jpeg && extensionKind != .jpegExtended {
+                    ignoredFileCount += 1
+                    continue
+                }
+                mediaURLsByBaseName[groupingKey, default: []].append(itemURL)
+            } else if extensionKind == .photoEdit,
+                      (values.isRegularFile == true || values.isDirectory == true || values.isPackage == true),
+                      !baseName.isEmpty {
+                if jpegOnly {
+                    ignoredFileCount += 1
+                    continue
+                }
+                sidecars[groupingKey] = itemURL
+            } else {
+                ignoredFileCount += 1
+            }
+        }
+
+        let photoSets = Self.assemble(media: mediaURLsByBaseName, sidecars: sidecars)
+        let total = photoSets.reduce(0) { $0 + $1.allFiles.count }
+
+        return ScanResult(
+            sourceDirectories: [],
+            photoSets: photoSets,
+            scannedFileCount: total,
+            ignoredFileCount: ignoredFileCount
+        )
+    }
+
+    /// Build sorted PhotoSets by merging sidecars into matching base names.
+    private static func assemble(media: [String: [URL]], sidecars: [String: URL]) -> [PhotoSet] {
         var photoSets: [PhotoSet] = []
         var processed: Set<String> = []
 
-        for (groupingKey, mediaURLs) in mediaURLsByBaseName {
+        for (groupingKey, mediaURLs) in media {
             processed.insert(groupingKey)
-            let editPath = sidecars[groupingKey]
             photoSets.append(PhotoSet(
-                baseName: Self.displayBaseName(for: groupingKey),
+                baseName: displayBaseName(for: groupingKey),
                 mediaFiles: mediaURLs,
-                editPath: editPath
+                editPath: sidecars[groupingKey]
             ))
         }
 
         // Handle sidecar-only entries (rare edge case).
         for (groupingKey, path) in sidecars where !processed.contains(groupingKey) {
             photoSets.append(PhotoSet(
-                baseName: Self.displayBaseName(for: groupingKey),
+                baseName: displayBaseName(for: groupingKey),
                 mediaFiles: [],
                 editPath: path
             ))
@@ -137,14 +202,7 @@ actor FileScanner {
             $0.baseName.localizedStandardCompare($1.baseName) == .orderedAscending
         }
 
-        let total = photoSets.reduce(0) { $0 + $1.allFiles.count }
-
-        return ScanResult(
-            sourceDirectories: [url],
-            photoSets: photoSets,
-            scannedFileCount: total,
-            ignoredFileCount: ignoredFileCount
-        )
+        return photoSets
     }
 
     /// Scan multiple directories recursively and concurrently, combining the results.

@@ -1,82 +1,98 @@
 # UI/UX Review — Task List
 
 Findings from a review of drag-and-drop, floating-window top bars, and menu bars
-(plus closely-related navigation paths). Ordered by severity. Check items off as
-they land.
+(plus closely-related navigation paths). All items below are now resolved on the
+`chore/ui-ux-review-tasks` branch. Each task records how it was addressed.
+
+> Build status: `swift build` → **Build complete** (no warnings).
+> A pre-existing compile error (`.accentColor` on `ShapeStyle`,
+> `LargeImageViewer.swift:146`) was fixed by cherry-picking the existing
+> `fix/inspector-accentcolor-shapestyle` commit (`6496f68`) from `origin/main`.
 
 ## 🔴 Critical — onboarding promises features that don't exist
 
-- [ ] **Empty state advertises non-existent capabilities.** `EmptyLibraryView.swift:34,46`
-  tells users to "Drag files or folders directly into DuckSort" and "Choose Import
-  from the File menu", but neither exists. Fix the copy **and/or** implement the
-  features below.
-- [ ] **No drag-and-drop anywhere in the app.** No `.onDrop` / `.dropDestination` /
-  `DropDelegate` / `registerForDraggedTypes` in the source tree. The drop-target card
-  in the empty state is decorative. Affects `ContentView`, `PhotoGridView`,
-  `EmptyLibraryView`, `SidebarView`.
-- [ ] **No File menu → Import.** `DuckSortApp.swift:21-49` adds only `SidebarCommands`,
-  `TextEditingCommands`, and `CommandMenu("Tools")`. The default File menu has no
-  Import item.
-- [ ] **"Import..." button is mislabeled.** It calls `addSourceDirectory()` →
-  `FolderPanel.chooseDirectory` (`PhotoLibraryViewModel.swift:194-195`) which sets
-  `canChooseFiles = false` (`FolderPanel.swift:13`) — folders only, despite the
-  "files or folders" promise. The action is also named three different things
-  ("Import…", "Add Source", "Add Photoshoot Folder"). Unify naming.
+- [x] **Empty state advertised non-existent capabilities.** Drag-and-drop and a
+  File → Import command now both exist, so `EmptyLibraryView.swift` copy is
+  accurate. The "Import…" button now calls `importItems()`.
+- [x] **No drag-and-drop.** Added `.dropDestination(for: URL.self)` over the main
+  content area in `ContentView.swift` (covering both the grid and the empty
+  state), with a dashed highlight while a drag is over the window. Drops route to
+  `PhotoLibraryViewModel.importURLs(_:)`.
+- [x] **No File menu → Import.** Added a `CommandGroup(after: .newItem)` in
+  `DuckSortApp.swift` with "Add Source Folder…" and "Import…".
+- [x] **"Import..." button mislabeled / inconsistent naming.** Naming unified:
+  **Import** = files *or* folders (`importItems()` → `FolderPanel.chooseItems`);
+  **Add Source Folder** = folder only (`addSourceDirectory()`). The folder panel
+  title is now "Add Source Folder" (was "Add Photoshoot Folder").
 
 ## 🟠 High
 
-- [ ] **Implement drag-and-drop entry point.** Add `.dropDestination(for: URL.self)` on
-  the `ContentView` content area and `EmptyLibraryView`, funneling into the existing
-  scan pipeline. Relax `FolderPanel` / scan path to accept individual files so
-  "files or folders" becomes true.
-- [ ] **Fragile floating-window close path.** `TagManagerView.swift:34-37` and
-  `ExportRuleEditorView.swift:25-27` close via `dismiss(); NSApp.keyWindow?.close()`.
-  - `dismiss()` is a dead no-op (panel hosted via `NSHostingView`, not a sheet).
-  - `NSApp.keyWindow` may not be the panel → can close the wrong window or nothing.
-  - Close the specific panel the manager already holds (`tagManagerPanel`, etc.),
-    e.g. pass a close closure into each view.
-- [ ] **Floating panels have no Esc / close button.** `FloatingPanel` hides all window
-  buttons including close (`FloatingWindowManager.swift:38-40`); "Done" is the only
-  exit. Wire `.keyboardShortcut(.cancelAction)` (Esc) on the Done buttons.
-- [ ] **Global key monitor leaks into floating windows.** The app-wide
-  `addLocalMonitorForEvents(.keyDown)` (`PhotoLibraryViewModel.swift:643`) only bails
-  for editable text fields (`ContentView.swift:186-189`). With Tag Manager / Rule
-  Editor / Shortcuts focused, `s`/`i`/`0`/arrows/tag-hotkeys still mutate the
-  background grid. Short-circuit when a floating panel is the key window (or scope
-  the monitor to the main window).
+- [x] **Drag-and-drop entry point implemented.** Folders dropped/imported become
+  source directories (recursive scan); individual files are grouped directly into
+  photo sets. New `FileScanner.scanFiles(_:jpegOnly:)` (sharing the grouping logic
+  via a new `assemble(media:sidecars:)` helper). Loose files are tracked in
+  `PhotoLibraryViewModel.looseFiles` and persisted via
+  `UserPreferences.lastLooseFilePaths`; `scanSourceDirectories` now scans folders
+  **and** loose files together.
+- [x] **Fragile floating-window close path fixed.** `FloatingWindowManager` now
+  passes an `onClose` closure into each hosted view that closes the *specific*
+  panel it owns (`tagManagerPanel`/`ruleEditorPanel`/`shortcutsPanel`). The dead
+  `dismiss()` + `NSApp.keyWindow?.close()` guessing was removed from
+  `TagManagerView`, `ExportRuleEditorView`, and `ShortcutsPopoverView`.
+- [x] **Esc / close button on floating panels.** Each panel's "Done" button keeps
+  `.defaultAction` (Return); a hidden sibling button adds `.cancelAction` (Esc).
+- [x] **Global key monitor no longer leaks into floating windows.**
+  `handleGlobalKeyPress` now returns early when `NSApp.keyWindow?.isFloatingPanel`
+  is true, so culling shortcuts can't mutate the hidden grid. Also: plain-letter
+  shortcuts (`s`/`i`/`0`) now require no `⌘`/`⌃`/`⌥`, fixing latent
+  `⌘S`/`⌘I`-style misfires.
 
 ## 🟡 Medium — menu bar
 
-- [ ] **Hardcoded shortcuts diverge from customizable ones.** Tools menu hardwires
-  `⌘T`/`⌘R`/`⌘/` (`DuckSortApp.swift:31,38,47`) while the same actions are also driven
-  by customizable `tagManagerHotkey`/`ruleEditorHotkey`/`openSourceHotkey`
-  (`ContentView.swift:192-206`). Rebinding leaves the menu label stale and the two
-  systems disagreeing. Pick one source of truth.
-- [ ] **Menu items silently no-op without an active view model.** Each Tools item is
-  guarded by `if let vm = ...activeViewModel` (`DuckSortApp.swift:27-46`). Use
-  `.disabled(activeViewModel == nil)` for feedback.
-- [ ] **No File menu**, despite the empty state pointing at it. Add at minimum
-  "Add Source Folder… ⌘O / Import…".
-- [ ] **Redundant titles.** Panels show a system title bar *and* an in-content header
-  with the same text (e.g. "Tag Manager" at `FloatingWindowManager.swift:68` +
-  `TagManagerView.swift:25`). Keep one.
+- [x] **Hardcoded shortcuts unified with customizable ones.** The menu is now the
+  single source of truth: `DuckSortApp` observes `UserPreferences.shared` and
+  derives each command's shortcut from the stored hotkey via
+  `KeyboardShortcutInfo.keyboardShortcut` + a new `optionalKeyboardShortcut(_:)`
+  modifier. The duplicate handling of these three actions was removed from the
+  global monitor, so rebinding a hotkey updates the menu and there is no
+  double-handling.
+- [x] **Menu items disabled without an active library.** `FloatingWindowManager`
+  is now an `ObservableObject` publishing `isReady`; all Tools/File commands use
+  `.disabled(!windowManager.isReady)`.
+- [x] **File menu added** with "Add Source Folder…" (uses the customizable Add
+  Source hotkey, default ⌘O) and "Import…" (⌘⇧I).
+- [x] **Redundant titles removed.** The in-content `.title2` headers were dropped
+  from Tag Manager, Routing Rules, and Keyboard Shortcuts panels; the system
+  title bar (set by `FloatingWindowManager`) is now the single title. Action rows
+  (Done / Import Contacts) are retained.
 
 ## 🟡 Medium — navigation
 
-- [ ] **Grid keyboard nav math doesn't match the layout.** Grid uses
-  `.adaptive(minimum: 180), spacing: 14, .padding(.horizontal, 20)`
-  (`PhotoGridView.swift:13,51`) but Up/Down row-stride uses `minWidth 208,
-  spacing 18, padding 56` (`ContentView.swift:353-359`). Derive both from a shared
-  source so arrows land correctly.
+- [x] **Grid keyboard-nav math matches the layout.** Column count is now computed
+  in `PhotoGridView` from the actual grid width using the *same* constants as the
+  `GridItem` (minimum 180, spacing 14, horizontal padding 20) and published to
+  `viewModel.gridColumnCount`. `ContentView.handleGridKeyPress` reads that instead
+  of the old mismatched `208/18/56` math (which also wrongly used full-window
+  width). The dead `columnsCount`/`windowWidth` were removed.
 
 ## ⚪ Minor / polish
 
-- [ ] **Two close affordances in the large viewer top bar** — `chevron.left`
-  (`LargeImageViewer.swift:73`) and `xmark` (`:154`) both call
-  `closeLargeImageViewer()`. Keep one.
-- [ ] **Pan offset doesn't accumulate.** `LargeImagePane.swift:73` sets
-  `panOffset = value.translation` instead of adding to the prior offset → panning a
-  zoomed image snaps back each gesture.
-- [ ] **`EdgeBorder` computed-property closures.** `LargeImageViewerSidebar.swift:205-232`
-  uses `var x/y/w/h` getter closures inside `path(in:)`; a `switch` or plain values
-  read more clearly.
+- [x] **One close affordance in the viewer top bar.** Removed the redundant left
+  `chevron.left` button (and its divider); the right-side `xmark` remains.
+- [x] **Pan offset accumulates.** `LargeImagePane` tracks `accumulatedPan`; drags
+  add to the committed offset and commit on `onEnded`, and it resets everywhere
+  `panOffset` resets (zoom buttons, double-tap, photo change).
+- [x] **`EdgeBorder` cleaned up.** `path(in:)` now builds each edge's `CGRect` via
+  a single `switch` instead of four computed-property closures.
+
+---
+
+## Notes / decisions
+
+- **Loose-file persistence:** individually imported files are persisted across
+  launches (mirroring source directories) in `UserPreferences.lastLooseFilePaths`.
+- **Import shortcut:** ⌘⇧I (distinct from the plain `i` inspector toggle, which is
+  now modifier-guarded).
+- **Verification:** validated via `swift build`. Manual UI verification (actual
+  drag-drop, panel Esc-close, menu enable/disable, arrow-key grid nav across
+  column counts) is still recommended on a running build.

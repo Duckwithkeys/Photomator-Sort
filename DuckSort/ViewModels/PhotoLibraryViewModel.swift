@@ -25,6 +25,9 @@ final class PhotoLibraryViewModel: ObservableObject {
     // MARK: - Published state
     
     @Published private(set) var sourceDirectories: [URL] = []
+    /// Individually imported files (via drag-and-drop or Import…) that live
+    /// outside of a scanned source directory.
+    @Published private(set) var looseFiles: [URL] = []
     @Published private(set) var destinationDirectory: URL?
     @Published private(set) var photoSets: [PhotoSet] = []
     @Published private(set) var photoMetadata: [UUID: MetadataSnapshot] = [:]
@@ -81,6 +84,10 @@ final class PhotoLibraryViewModel: ObservableObject {
     }
     @Published var isLargeImageViewerOpen: Bool = false
     @Published var currentTagCategoryID: UUID? = nil
+
+    /// Number of columns the photo grid is currently rendering. Kept in sync by
+    /// PhotoGridView so arrow-key navigation matches the visible layout.
+    var gridColumnCount: Int = 1
     
     // MARK: - Services
     
@@ -113,7 +120,8 @@ final class PhotoLibraryViewModel: ObservableObject {
         
         let urls = UserPreferences.shared.lastSourceDirectoryIDs.map { URL(fileURLWithPath: $0) }
         self.sourceDirectories = urls
-        
+        self.looseFiles = UserPreferences.shared.lastLooseFilePaths.map { URL(fileURLWithPath: $0) }
+
         if let destID = UserPreferences.shared.lastDestinationDirectoryID {
             self.destinationDirectory = URL(fileURLWithPath: destID)
         }
@@ -124,7 +132,7 @@ final class PhotoLibraryViewModel: ObservableObject {
         
         self.isInitializing = false
         
-        if !sourceDirectories.isEmpty {
+        if !sourceDirectories.isEmpty || !looseFiles.isEmpty {
             Task { [weak self] in
                 self?.scanSourceDirectories(urls)
             }
@@ -192,16 +200,67 @@ final class PhotoLibraryViewModel: ObservableObject {
     // MARK: - Directory selection
     
     func addSourceDirectory() {
-        guard let url = FolderPanel.chooseDirectory(title: "Add Photoshoot Folder") else { return }
+        guard let url = FolderPanel.chooseDirectory(title: "Add Source Folder") else { return }
         let standardized = url.standardizedFileURL
         if !sourceDirectories.contains(standardized) {
             var updated = sourceDirectories
             updated.append(standardized)
             sourceDirectories = updated
-            UserPreferences.shared.lastSourceDirectoryIDs = updated.map(\.path)
-            UserPreferences.shared.save()
+            persistSources()
             scanSourceDirectories(updated)
         }
+    }
+
+    /// Open a panel that accepts both files and folders, then import the result.
+    func importItems() {
+        let urls = FolderPanel.chooseItems(title: "Import Photos")
+        guard !urls.isEmpty else { return }
+        importURLs(urls)
+    }
+
+    /// Import a mix of dropped/selected files and folders. Folders become source
+    /// directories (scanned recursively); files are grouped directly into sets.
+    func importURLs(_ urls: [URL]) {
+        let fm = FileManager.default
+        var newDirs: [URL] = []
+        var newFiles: [URL] = []
+
+        for url in urls {
+            let standardized = url.standardizedFileURL
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: standardized.path, isDirectory: &isDir) else { continue }
+            if isDir.boolValue {
+                newDirs.append(standardized)
+            } else {
+                newFiles.append(standardized)
+            }
+        }
+
+        var dirs = sourceDirectories
+        var files = looseFiles
+        var changed = false
+
+        for dir in newDirs where !dirs.contains(dir) {
+            dirs.append(dir)
+            changed = true
+        }
+        for file in newFiles where !files.contains(file) {
+            files.append(file)
+            changed = true
+        }
+
+        guard changed else { return }
+
+        sourceDirectories = dirs
+        looseFiles = files
+        persistSources()
+        scanSourceDirectories(dirs)
+    }
+
+    private func persistSources() {
+        UserPreferences.shared.lastSourceDirectoryIDs = sourceDirectories.map(\.path)
+        UserPreferences.shared.lastLooseFilePaths = looseFiles.map(\.path)
+        UserPreferences.shared.save()
     }
     
     func removeSourceDirectory(_ url: URL) {
@@ -209,17 +268,16 @@ final class PhotoLibraryViewModel: ObservableObject {
         var updated = sourceDirectories
         updated.removeAll { $0.standardizedFileURL == standardized }
         sourceDirectories = updated
-        UserPreferences.shared.lastSourceDirectoryIDs = updated.map(\.path)
-        UserPreferences.shared.save()
+        persistSources()
         scanSourceDirectories(updated)
     }
-    
+
     func clearSourceDirectories() {
         sourceDirectories = []
+        looseFiles = []
         photoSets = []
         photoMetadata = [:]
-        UserPreferences.shared.lastSourceDirectoryIDs = []
-        UserPreferences.shared.save()
+        persistSources()
         statusMessage = "Choose a photoshoot folder to begin."
     }
     
@@ -242,23 +300,47 @@ final class PhotoLibraryViewModel: ObservableObject {
         errorMessage = nil
         isScanning = true
         
-        if urls.isEmpty {
-            self.statusMessage = "No source folders selected."
+        let looseFiles = self.looseFiles
+
+        if urls.isEmpty && looseFiles.isEmpty {
+            self.statusMessage = "No sources selected."
             self.isScanning = false
             return
         }
-        
+
         let foldersText = urls.count == 1 ? urls[0].lastPathComponent : "\(urls.count) folders"
-        statusMessage = "Scanning \(foldersText) and subfolders..."
-        
+        statusMessage = urls.isEmpty
+            ? "Scanning \(looseFiles.count) imported files..."
+            : "Scanning \(foldersText) and subfolders..."
+
         scanTask = Task { [scanner, isJpegOnlyMode] in
             do {
-                let result = try await scanner.scanDirectories(urls, jpegOnly: isJpegOnlyMode)
-                self.photoSets = result.photoSets
-                let folderNames = urls.map(\.lastPathComponent).joined(separator: ", ")
-                self.statusMessage = "Found \(result.photoSets.count) photo sets across [\(folderNames)], \(result.scannedFileCount) matching files."
-                self.loadExistingTags(for: result.photoSets)
-                self.loadMetadata(for: result.photoSets)
+                var photoSets: [PhotoSet] = []
+                var scannedFileCount = 0
+
+                if !urls.isEmpty {
+                    let dirResult = try await scanner.scanDirectories(urls, jpegOnly: isJpegOnlyMode)
+                    photoSets.append(contentsOf: dirResult.photoSets)
+                    scannedFileCount += dirResult.scannedFileCount
+                }
+
+                if !looseFiles.isEmpty {
+                    let fileResult = try await scanner.scanFiles(looseFiles, jpegOnly: isJpegOnlyMode)
+                    photoSets.append(contentsOf: fileResult.photoSets)
+                    scannedFileCount += fileResult.scannedFileCount
+                }
+
+                photoSets.sort {
+                    $0.baseName.localizedStandardCompare($1.baseName) == .orderedAscending
+                }
+
+                self.photoSets = photoSets
+                let sourceLabel = urls.map(\.lastPathComponent).joined(separator: ", ")
+                let scope = looseFiles.isEmpty ? sourceLabel
+                    : (urls.isEmpty ? "imported files" : "\(sourceLabel) + imported files")
+                self.statusMessage = "Found \(photoSets.count) photo sets across [\(scope)], \(scannedFileCount) matching files."
+                self.loadExistingTags(for: photoSets)
+                self.loadMetadata(for: photoSets)
             } catch is CancellationError {
                 self.statusMessage = "Scan cancelled."
             } catch {

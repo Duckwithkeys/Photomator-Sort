@@ -105,10 +105,35 @@ struct KeyboardShortcutInfo: Hashable, Sendable {
         if option { parts.append("⌥") }
         if shift { parts.append("⇧") }
         if command { parts.append("⌘") }
-        
+
         let keyLabel = key.count == 1 ? key.uppercased() : key.capitalized
         parts.append(keyLabel)
         return parts.joined()
+    }
+
+    /// SwiftUI keyboard shortcut for menu commands. Nil when there is no
+    /// single-character key to bind.
+    var keyboardShortcut: KeyboardShortcut? {
+        guard key.count == 1, let char = key.first else { return nil }
+        var modifiers: EventModifiers = []
+        if command { modifiers.insert(.command) }
+        if shift { modifiers.insert(.shift) }
+        if option { modifiers.insert(.option) }
+        if control { modifiers.insert(.control) }
+        return KeyboardShortcut(KeyEquivalent(char), modifiers: modifiers)
+    }
+}
+
+extension View {
+    /// Applies a keyboard shortcut only when one is available, so menu commands
+    /// can reflect user-customizable hotkeys without claiming a fixed binding.
+    @ViewBuilder
+    func optionalKeyboardShortcut(_ shortcut: KeyboardShortcut?) -> some View {
+        if let shortcut {
+            self.keyboardShortcut(shortcut)
+        } else {
+            self
+        }
     }
 }
 

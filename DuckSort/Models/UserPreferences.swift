@@ -12,6 +12,7 @@ final class UserPreferences: ObservableObject {
     static let shared = UserPreferences()
 
     @Published var lastSourceDirectoryIDs: [String] = []
+    @Published var lastLooseFilePaths: [String] = []
     @Published var lastDestinationDirectoryID: String?
     @Published var lastFilterRule: PhotoFilterRule = .allPhotos
     @Published var lastNamingPreset: ExportNamingPreset = .dateOriginalSequence
@@ -25,6 +26,7 @@ final class UserPreferences: ObservableObject {
 
     private enum Keys {
         static let sourceList  = "lastSourceDirectories"
+        static let looseFiles  = "lastLooseFiles"
         static let source      = "lastSourceDirectory" // for migration
         static let destination = "lastDestinationDirectory"
         static let filter      = "lastFilterRule"
@@ -41,6 +43,7 @@ final class UserPreferences: ObservableObject {
 
     func save() {
         UserDefaults.standard.set(lastSourceDirectoryIDs, forKey: Keys.sourceList)
+        UserDefaults.standard.set(lastLooseFilePaths, forKey: Keys.looseFiles)
         UserDefaults.standard.set(lastDestinationDirectoryID, forKey: Keys.destination)
         UserDefaults.standard.set(lastFilterRule.rawValue, forKey: Keys.filter)
         UserDefaults.standard.set(lastNamingPreset.rawValue, forKey: Keys.naming)
@@ -59,6 +62,8 @@ final class UserPreferences: ObservableObject {
             lastSourceDirectoryIDs = [oldSource]
         }
         
+        lastLooseFilePaths = UserDefaults.standard.stringArray(forKey: Keys.looseFiles) ?? []
+
         lastDestinationDirectoryID = UserDefaults.standard.string(forKey: Keys.destination)
 
         if let raw = UserDefaults.standard.string(forKey: Keys.filter),
@@ -85,6 +90,7 @@ final class UserPreferences: ObservableObject {
 
     func clear() {
         UserDefaults.standard.removeObject(forKey: Keys.sourceList)
+        UserDefaults.standard.removeObject(forKey: Keys.looseFiles)
         UserDefaults.standard.removeObject(forKey: Keys.source)
         UserDefaults.standard.removeObject(forKey: Keys.destination)
         UserDefaults.standard.removeObject(forKey: Keys.filter)
@@ -97,6 +103,7 @@ final class UserPreferences: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Keys.openSourceHotkey)
         
         lastSourceDirectoryIDs = []
+        lastLooseFilePaths = []
         lastDestinationDirectoryID = nil
         lastFilterRule = .allPhotos
         lastNamingPreset = .dateOriginalSequence

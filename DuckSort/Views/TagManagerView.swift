@@ -13,8 +13,8 @@ import UniformTypeIdentifiers
 struct TagManagerView: View {
     @ObservedObject var viewModel: PhotoLibraryViewModel
     @ObservedObject var tagStore: TagStore
-    @Environment(\.dismiss) private var dismiss
-    
+    var onClose: () -> Void = {}
+
     @State private var newCategoryName: String = ""
     @State private var newTagText: String = ""
     @State private var newTagCategoryID: UUID?
@@ -22,20 +22,17 @@ struct TagManagerView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Tag Manager")
-                    .font(.title2.weight(.semibold))
-                
                 Button(action: importContacts) {
                     Label("Import Contacts...", systemImage: "person.crop.circle.badge.plus")
                 }
                 .buttonStyle(.bordered)
-                
+
                 Spacer()
-                Button("Done") {
-                    dismiss()
-                    NSApp.keyWindow?.close()
-                }
-                .keyboardShortcut(.defaultAction)
+                Button("Done", action: onClose)
+                    .keyboardShortcut(.defaultAction)
+                Button("", action: onClose)
+                    .keyboardShortcut(.cancelAction)
+                    .hidden()
             }
             .padding()
 

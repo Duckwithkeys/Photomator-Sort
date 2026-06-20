@@ -69,23 +69,6 @@ struct LargeImageViewer: View {
         HStack(spacing: 12) {
             Spacer().frame(width: 72) // Space for macOS traffic lights
 
-            // Back/Escape button next to traffic lights
-            Button {
-                viewModel.closeLargeImageViewer()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.7))
-                    .padding(6)
-                    .liquidGlassButton(isHovered: false)
-            }
-            .buttonStyle(.plain)
-            .help("Close viewer (Esc)")
-
-            Rectangle()
-                .fill(PhotomatorTheme.separator)
-                .frame(width: 1, height: 16)
-
             // Navigation counter
             Text("\(viewModel.focusedPhotoIndex + 1) / \(viewModel.filteredPhotoSets.count)")
                 .font(.caption.monospacedDigit())

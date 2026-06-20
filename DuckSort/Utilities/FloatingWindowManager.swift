@@ -46,11 +46,16 @@ final class FloatingPanel<Content: View>: NSPanel {
 }
 
 @MainActor
-final class FloatingWindowManager {
+final class FloatingWindowManager: ObservableObject {
     static let shared = FloatingWindowManager()
-    
-    weak var activeViewModel: PhotoLibraryViewModel?
-    
+
+    weak var activeViewModel: PhotoLibraryViewModel? {
+        didSet { isReady = (activeViewModel != nil) }
+    }
+
+    /// Drives `.disabled` state for menu commands that require an active library.
+    @Published private(set) var isReady = false
+
     private var tagManagerPanel: NSPanel?
     private var ruleEditorPanel: NSPanel?
     private var shortcutsPanel: NSPanel?
@@ -63,7 +68,9 @@ final class FloatingWindowManager {
             return
         }
         
-        let view = TagManagerView(viewModel: viewModel, tagStore: viewModel.tagStore)
+        let view = TagManagerView(viewModel: viewModel, tagStore: viewModel.tagStore) { [weak self] in
+            self?.tagManagerPanel?.close()
+        }
         let panel = FloatingPanel(
             title: "Tag Manager",
             content: view,
@@ -89,7 +96,9 @@ final class FloatingWindowManager {
             return
         }
         
-        let view = ExportRuleEditorView(viewModel: viewModel, ruleStore: viewModel.ruleStore, tagStore: viewModel.tagStore)
+        let view = ExportRuleEditorView(viewModel: viewModel, ruleStore: viewModel.ruleStore, tagStore: viewModel.tagStore) { [weak self] in
+            self?.ruleEditorPanel?.close()
+        }
         let panel = FloatingPanel(
             title: "Export Routing Rules",
             content: view,
@@ -117,7 +126,9 @@ final class FloatingWindowManager {
         
         // Wrap the ShortcutsPopoverView in a ScrollView to fit nicely
         let view = ScrollView {
-            ShortcutsPopoverView(viewModel: viewModel)
+            ShortcutsPopoverView(viewModel: viewModel) { [weak self] in
+                self?.shortcutsPanel?.close()
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         

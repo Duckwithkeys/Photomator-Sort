@@ -7,11 +7,23 @@ import SwiftUI
 
 struct PhotoGridView: View {
     @ObservedObject var viewModel: PhotoLibraryViewModel
-    @State private var gridWidth: CGFloat = 800
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 180), spacing: 14)
-    ]
+    // Keep these in sync with `columns` and the grid padding below so the
+    // computed column count matches what LazyVGrid actually renders.
+    private static let minItemWidth: CGFloat = 180
+    private static let gridSpacing: CGFloat = 14
+    private static let horizontalPadding: CGFloat = 20
+
+    private var columns: [GridItem] {
+        [GridItem(.adaptive(minimum: Self.minItemWidth), spacing: Self.gridSpacing)]
+    }
+
+    private static func columnCount(forWidth width: CGFloat) -> Int {
+        let available = width - horizontalPadding * 2
+        guard available > 0 else { return 1 }
+        let count = Int(floor((available + gridSpacing) / (minItemWidth + gridSpacing)))
+        return max(1, count)
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -58,10 +70,10 @@ struct PhotoGridView: View {
                 }
             }
             .onAppear {
-                gridWidth = geometry.size.width
+                viewModel.gridColumnCount = Self.columnCount(forWidth: geometry.size.width)
             }
             .onChange(of: geometry.size.width) { _, newWidth in
-                gridWidth = newWidth
+                viewModel.gridColumnCount = Self.columnCount(forWidth: newWidth)
             }
         }
         .overlay(alignment: .top) {

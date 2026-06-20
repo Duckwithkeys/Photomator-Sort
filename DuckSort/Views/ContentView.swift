@@ -8,12 +8,12 @@ import AppKit
 
 struct ContentView: View {
     @StateObject private var viewModel = PhotoLibraryViewModel()
-    @State private var windowWidth: CGFloat = 920
 
     @State private var showSourcesPopover = false
+    @State private var isDropTargeted = false
 
     var body: some View {
-        GeometryReader { geometry in
+        GeometryReader { _ in
             HStack(spacing: 0) {
                 SidebarView(viewModel: viewModel)
                 
@@ -24,24 +24,34 @@ struct ContentView: View {
                     VStack(spacing: 12) {
                         if viewModel.photoSets.isEmpty {
                             EmptyLibraryView(isScanning: viewModel.isScanning) {
-                                viewModel.addSourceDirectory()
+                                viewModel.importItems()
                             }
                         } else {
                             PhotoGridView(viewModel: viewModel)
                         }
-                        
+
                         TransferFooter(viewModel: viewModel)
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(PhotomatorTheme.background)
+                    .dropDestination(for: URL.self) { urls, _ in
+                        viewModel.importURLs(urls)
+                        return !urls.isEmpty
+                    } isTargeted: { targeted in
+                        isDropTargeted = targeted
+                    }
+                    .overlay {
+                        if isDropTargeted {
+                            RoundedRectangle(cornerRadius: 8)
+                                .strokeBorder(PhotomatorTheme.selectedBlue, style: StrokeStyle(lineWidth: 3, dash: [8]))
+                                .padding(6)
+                                .allowsHitTesting(false)
+                                .transition(.opacity)
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.15), value: isDropTargeted)
                 }
-            }
-            .onAppear {
-                windowWidth = geometry.size.width
-            }
-            .onChange(of: geometry.size.width) { _, newWidth in
-                windowWidth = newWidth
             }
         }
         .frame(minWidth: 920, minHeight: 640)
@@ -184,26 +194,17 @@ struct ContentView: View {
     }
 
     private func handleGlobalKeyPress(_ event: NSEvent) -> Bool {
+        // Ignore keys while a floating utility panel (Tag Manager, Routing Rules,
+        // Shortcuts) is focused, so culling shortcuts don't mutate the hidden grid.
+        if let keyWindow = NSApp.keyWindow, keyWindow.isFloatingPanel {
+            return false
+        }
         if isFirstResponderTextField(in: NSApp.keyWindow) {
             return false
         }
 
-        // Intercept general app shortcuts
-        if let tagManagerShortcut = viewModel.tagManagerShortcutInfo,
-           eventMatchesShortcut(event, shortcut: tagManagerShortcut) {
-            FloatingWindowManager.shared.showTagManager(viewModel: viewModel)
-            return true
-        }
-        if let ruleEditorShortcut = viewModel.ruleEditorShortcutInfo,
-           eventMatchesShortcut(event, shortcut: ruleEditorShortcut) {
-            FloatingWindowManager.shared.showRuleEditor(viewModel: viewModel)
-            return true
-        }
-        if let openSourceShortcut = viewModel.openSourceShortcutInfo,
-           eventMatchesShortcut(event, shortcut: openSourceShortcut) {
-            viewModel.addSourceDirectory()
-            return true
-        }
+        // App-action shortcuts (Add Source, Tag Manager, Routing Rules) are owned
+        // by the menu commands so a single, user-customizable binding stays in sync.
 
         // Intercept Command + A (Select All in the current view)
         if let chars = event.charactersIgnoringModifiers?.lowercased(),
@@ -246,9 +247,10 @@ struct ContentView: View {
         default:
             if let chars = event.charactersIgnoringModifiers, chars.count == 1 {
                 let char = chars.first!
+                let isPlainKey = event.modifierFlags.intersection([.command, .control, .option]).isEmpty
 
                 // 's' or 'S' to toggle selection
-                if char == "s" || char == "S" {
+                if isPlainKey, char == "s" || char == "S" {
                     if let photo = viewModel.currentFocusedPhotoSet {
                         viewModel.toggleSelection(for: photo.id)
                     }
@@ -256,13 +258,12 @@ struct ContentView: View {
                 }
 
                 // 'i' or 'I' to toggle inspector
-                if char == "i" || char == "I" {
+                if isPlainKey, char == "i" || char == "I" {
                     viewModel.isInspectorOpen.toggle()
                     return true
                 }
 
-
-                if char == "0" {
+                if isPlainKey, char == "0" {
                     if let photo = viewModel.currentFocusedPhotoSet {
                         viewModel.clearTags(for: photo.id)
                     }
@@ -285,7 +286,7 @@ struct ContentView: View {
         let count = viewModel.filteredPhotoSets.count
         guard count > 0 else { return false }
 
-        let cols = columnsCount(for: windowWidth)
+        let cols = max(1, viewModel.gridColumnCount)
 
         switch event.keyCode {
         case 123: // Left Arrow
@@ -311,9 +312,10 @@ struct ContentView: View {
         default:
             if let chars = event.charactersIgnoringModifiers, chars.count == 1 {
                 let char = chars.first!
+                let isPlainKey = event.modifierFlags.intersection([.command, .control, .option]).isEmpty
 
                 // 's' or 'S' to toggle selection
-                if char == "s" || char == "S" {
+                if isPlainKey, char == "s" || char == "S" {
                     if viewModel.focusedPhotoIndex >= 0 && viewModel.focusedPhotoIndex < count {
                         let photo = viewModel.filteredPhotoSets[viewModel.focusedPhotoIndex]
                         viewModel.toggleSelection(for: photo.id)
@@ -322,13 +324,12 @@ struct ContentView: View {
                 }
 
                 // 'i' or 'I' to toggle inspector
-                if char == "i" || char == "I" {
+                if isPlainKey, char == "i" || char == "I" {
                     viewModel.isInspectorOpen.toggle()
                     return true
                 }
 
-
-                if char == "0" {
+                if isPlainKey, char == "0" {
                     if viewModel.focusedPhotoIndex >= 0 && viewModel.focusedPhotoIndex < count {
                         let photo = viewModel.filteredPhotoSets[viewModel.focusedPhotoIndex]
                         viewModel.clearTags(for: photo.id)
@@ -350,32 +351,23 @@ struct ContentView: View {
         }
     }
 
-    private func columnsCount(for width: CGFloat) -> Int {
-        let minWidth: CGFloat = 208
-        let spacing: CGFloat = 18
-        let padding: CGFloat = 56 // 28 * 2
-        let availableWidth = width - padding
-        let count = Int(floor((availableWidth + spacing) / (minWidth + spacing)))
-        return max(1, count)
-    }
-
 }
 
 // MARK: - Keyboard Shortcuts Reference & Configuration Popover
 
 struct ShortcutsPopoverView: View {
     @ObservedObject var viewModel: PhotoLibraryViewModel
+    var onClose: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Keyboard Shortcuts")
-                    .font(.title2.weight(.semibold))
                 Spacer()
-                Button("Done") {
-                    NSApp.keyWindow?.close()
-                }
-                .keyboardShortcut(.defaultAction)
+                Button("Done", action: onClose)
+                    .keyboardShortcut(.defaultAction)
+                Button("", action: onClose)
+                    .keyboardShortcut(.cancelAction)
+                    .hidden()
             }
             .padding(.bottom, 2)
 

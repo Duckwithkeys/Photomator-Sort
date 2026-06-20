@@ -18,6 +18,7 @@ struct LargeImagePane: View {
     @State private var zoomScale: CGFloat = 1.0
     @State private var currentAmount: CGFloat = 0.0 // Tracks active pinch change
     @State private var panOffset: CGSize = .zero
+    @State private var accumulatedPan: CGSize = .zero // Pan committed by prior drags
 
     private let minZoom: CGFloat = 0.5
     private let maxZoom: CGFloat = 5.0
@@ -70,8 +71,14 @@ struct LargeImagePane: View {
                                 with: DragGesture(minimumDistance: 0)
                                     .onChanged { value in
                                         if (zoomScale + currentAmount) > 1.0 {
-                                            panOffset = value.translation
+                                            panOffset = CGSize(
+                                                width: accumulatedPan.width + value.translation.width,
+                                                height: accumulatedPan.height + value.translation.height
+                                            )
                                         }
+                                    }
+                                    .onEnded { _ in
+                                        accumulatedPan = panOffset
                                     }
                             )
                     )
@@ -80,6 +87,7 @@ struct LargeImagePane: View {
                             if zoomScale > 1.0 {
                                 zoomScale = 1.0
                                 panOffset = .zero
+                                accumulatedPan = .zero
                             } else if let nsImage = highResImage ?? lowResImage {
                                 let fitScale = min(
                                     geometry.size.width / nsImage.size.width,
@@ -87,6 +95,7 @@ struct LargeImagePane: View {
                                 )
                                 zoomScale = max(fitScale * 2.0, 1.5)
                                 panOffset = .zero
+                                accumulatedPan = .zero
                             }
                         }
                     }
@@ -105,6 +114,7 @@ struct LargeImagePane: View {
                             withAnimation(.spring()) {
                                 zoomScale = clamp(zoomScale * 0.7)
                                 panOffset = .zero
+                                accumulatedPan = .zero
                             }
                         } label: {
                             Image(systemName: "minus.magnifyingglass")
@@ -125,6 +135,7 @@ struct LargeImagePane: View {
                             withAnimation(.spring()) {
                                 zoomScale = clamp(zoomScale * 1.4)
                                 panOffset = .zero
+                                accumulatedPan = .zero
                             }
                         } label: {
                             Image(systemName: "plus.magnifyingglass")
@@ -139,6 +150,7 @@ struct LargeImagePane: View {
                             withAnimation(.spring()) {
                                 zoomScale = 1.0
                                 panOffset = .zero
+                                accumulatedPan = .zero
                             }
                         } label: {
                             Image(systemName: "arrow.2.squarepath")
@@ -161,6 +173,7 @@ struct LargeImagePane: View {
             zoomScale = 1.0
             currentAmount = 0
             panOffset = .zero
+            accumulatedPan = .zero
             await imageLoader.load(url: photoSet.preferredPreviewURL)
         }
     }
