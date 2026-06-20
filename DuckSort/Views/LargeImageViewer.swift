@@ -143,7 +143,7 @@ struct LargeImageViewer: View {
             } label: {
                 Image(systemName: "info.circle")
                     .font(.body)
-                    .foregroundStyle(viewModel.isInspectorOpen ? .accentColor : .white.opacity(0.7))
+                    .foregroundStyle(viewModel.isInspectorOpen ? Color.accentColor : Color.white.opacity(0.7))
                     .padding(6)
                     .liquidGlassButton(isHovered: false, isApplied: viewModel.isInspectorOpen)
             }
