@@ -11,6 +11,7 @@ A native macOS application designed to automate the workflow of scanning, organi
 - **Custom Tagging**: A fully-featured Tag Manager to create, edit, and assign custom tags to your photo groups.
 - **Export Routing Rules**: Define rule-based conditions (e.g. based on tags, file extensions, etc.) to automatically route your files to specific target directories.
 - **Batch Transfer Engine**: Execute batch operations to copy or move files safely to their destination folders.
+- **Metadata Preservation**: On copy, move, and export, DuckSort writes an `.xmp` sidecar beside every file (RAW, HEIF, JPEG) recording your custom tags and the photo's capture metadata (camera, lens, ISO, shutter, aperture, date). Re-encoded JPEG exports also embed the tag keywords inside the file.
 - **High-Resolution Preview**: Double-click or press space to view full-canvas previews of your images.
 - **Photo Metadata Inspector**: A side-panel overlay in the image viewer to see Aperture, Shutter Speed, ISO, Camera, and Lens.
 - **Visual Transfer Progress Bar**: High precision byte-level tracking displaying real-time data transfer rate and ETA during batch operations.
