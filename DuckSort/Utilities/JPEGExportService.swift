@@ -11,15 +11,30 @@ struct JPEGExportPlan: Sendable {
     let destinationDirectory: URL
     let photoSets: [PhotoSet]
     let options: JPEGExportOptions
+    let tagNames: [UUID: Set<String>]
+
+    init(
+        destinationDirectory: URL,
+        photoSets: [PhotoSet],
+        options: JPEGExportOptions,
+        tagNames: [UUID: Set<String>] = [:]
+    ) {
+        self.destinationDirectory = destinationDirectory
+        self.photoSets = photoSets
+        self.options = options
+        self.tagNames = tagNames
+    }
 }
 
 struct JPEGExportSummary: Sendable {
     let fileCount: Int
     let destinationDirectory: URL
+    let sidecarFailures: Int
 }
 
 actor JPEGExportService {
     private let metadataReader = MetadataReader()
+    private let sidecarService = XMPTaggingService()
 
     func export(
         _ plan: JPEGExportPlan,
@@ -33,6 +48,7 @@ actor JPEGExportService {
 
         let exportableSets = plan.photoSets.filter { $0.preferredPreviewURL != nil }
         var exported = 0
+        var sidecarFailures = 0
         
         var totalBytes: Int64 = 0
         for set in exportableSets {
@@ -68,7 +84,14 @@ actor JPEGExportService {
                 fileManager: fm
             )
 
-            try writeJPEG(from: sourceURL, to: destinationURL, quality: plan.options.jpegQuality)
+            try writeJPEG(from: sourceURL, to: destinationURL, quality: plan.options.jpegQuality, tagNames: plan.tagNames[photoSet.id] ?? [])
+            let tagNamesForSet = plan.tagNames[photoSet.id] ?? []
+            let payload = SidecarPayload(tagNames: tagNamesForSet, capture: metadata)
+            do {
+                try await sidecarService.writeExportSidecar(payload, besideDestinationFile: destinationURL)
+            } catch {
+                sidecarFailures += 1
+            }
             exported += 1
             
             let fileSize = (try? fm.attributesOfItem(atPath: sourceURL.path)[.size] as? Int64) ?? 0
@@ -86,7 +109,7 @@ actor JPEGExportService {
             ))
         }
 
-        return JPEGExportSummary(fileCount: exported, destinationDirectory: plan.destinationDirectory)
+        return JPEGExportSummary(fileCount: exported, destinationDirectory: plan.destinationDirectory, sidecarFailures: sidecarFailures)
     }
 
     private func destinationFolder(
@@ -137,7 +160,7 @@ actor JPEGExportService {
         return FilenameSanitizer.clean(parts.joined(separator: "_")) + ".jpg"
     }
 
-    private func writeJPEG(from sourceURL: URL, to destinationURL: URL, quality: Double) throws {
+    private func writeJPEG(from sourceURL: URL, to destinationURL: URL, quality: Double, tagNames: Set<String>) throws {
         guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
               let destination = CGImageDestinationCreateWithURL(
@@ -153,6 +176,7 @@ actor JPEGExportService {
         let sourceProperties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] ?? [:]
         var destinationProperties = sourceProperties
         destinationProperties[kCGImageDestinationLossyCompressionQuality] = quality
+        destinationProperties = XMPTaggingService.mergingKeywords(tagNames, into: destinationProperties)
 
         CGImageDestinationAddImage(destination, image, destinationProperties as CFDictionary)
 
