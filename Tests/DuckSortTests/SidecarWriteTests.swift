@@ -26,4 +26,19 @@ final class SidecarWriteTests: XCTestCase {
         XCTAssertTrue(xml.contains("exif:LensModel=\"XF35mm\""))
         XCTAssertTrue(xml.contains("exif:ISOSpeedRatings=\"400\""))
     }
+
+    func test_writeExportSidecar_escapesQuoteInAttributeValue() async throws {
+        let dir = try TempDir.make()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let media = dir.appendingPathComponent("IMG_0002.RAF")
+        let payload = SidecarPayload(
+            tagNames: [],
+            capture: MetadataSnapshot(cameraModel: "Cam \"Pro\"", lensModel: nil,
+                                      captureDate: nil, aperture: nil, shutterSpeed: nil, iso: nil)
+        )
+        try await XMPTaggingService().writeExportSidecar(payload, besideDestinationFile: media)
+        let xml = try String(contentsOf: dir.appendingPathComponent("IMG_0002.xmp"), encoding: .utf8)
+        XCTAssertTrue(xml.contains("tiff:Model=\"Cam &quot;Pro&quot;\""))
+        XCTAssertFalse(xml.contains("\"Pro\""))
+    }
 }
