@@ -119,7 +119,7 @@ actor FileTransferService {
                     } catch {
                         sidecarFailures += 1
                     }
-                    if plan.operation == .move {
+                    if plan.operation == .move && !isSameLocation {
                         removeOrphanSourceSidecar(for: sourceURL, fileManager: fm)
                     }
                 }
