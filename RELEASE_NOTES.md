@@ -1,3 +1,31 @@
+# DuckSort v1.2.1 (Performance, Grid Refinements & Format Support)
+
+Welcome to version 1.2.1 of **DuckSort**! This release introduces critical performance optimizations in the large image viewer, robust format support for standard HEIF/HEIC files and additional raw manufacturer formats, precise alignment and layout refinements in the photo grid cells, and improved resilience when loading multiple sources.
+
+## ✨ What's New in v1.2.1
+* **Grid Cell & Badge Refinements**:
+  - Redesigned the photo grid cells with a clean, borderless profile and 12pt corner-rounded thumbnails.
+  - Linked badge overlays (format pills, rating indicators, flags) directly to the square thumbnail bounds, guaranteeing badges never clip outside the photo box area.
+  - Fixed grid row alignment using `Spacer(minLength: 0)` to keep neighbor cells top-aligned even when some cells expand due to active tags.
+  - Highlighted selected items with a 3pt green border (and green text) and focused items with a 2.5pt brand blue border (and blue text).
+* **Format Completeness & Warnings**:
+  - Replaced the generic link badge with a vibrant orange magic wand (`wand.and.stars`) icon for edit sidecars.
+  - Added a red exclamation triangle warning badge for incomplete sets (e.g. standalone JPEGs or sets missing a RAW or Photomator edit sidecar) when not in JPEG-Only mode.
+* **Expanded Image & HEIF Support**:
+  - Fully integrated standard HEIC and HEIF formats (`.heif`, `.heic`, `.hif`) into the culling and scanning workflows.
+  - Extended raw format detection to support Sony (`.arw`), Canon (`.cr2`/`.cr3`), Nikon (`.nef`), Adobe (`.dng`), Olympus (`.orf`), Panasonic (`.rw2`), and Pentax (`.pef`).
+* **Resilient Multitasking Scanner**:
+  - Made the folder scanner fully resilient: an error scanning one source folder no longer disables or wipes out other successfully loaded sources.
+  - Added a warning symbol next to failing sources in the sidebar list to indicate exactly which folder failed to load.
+* **Filmstrip & Preloading Optimization**:
+  - Rebuilt the filmstrip preloading to restrict rendering to a sliding window of 10 images ahead, dramatically reducing memory overhead and eliminating scroll delay.
+  - Enabled the large image viewer to trigger on-demand thumbnail generation for filmstrip items that haven't been scrolled into view in the grid.
+* **Source Folder Actions & Footer Explanations**:
+  - Added a button to instantly remove individual files or folders from the sources list in the sidebar.
+  - Documented sorting actions in the bottom Transfer Footer to clarify the current Destination folder and transfer rule behavior.
+
+---
+
 # DuckSort v1.2.0 (Branded UI, Extended Scroll & Streamlined Operations)
 
 Welcome to version 1.2.0 of **DuckSort**! This release introduces custom branded visual assets, layout refinements that maximize vertical screen real estate, enhanced sidebar features, and streamlined culling controls.
