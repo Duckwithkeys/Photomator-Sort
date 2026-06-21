@@ -40,13 +40,9 @@ struct PhotoGridView: View {
                                 toggleSelection: {
                                     viewModel.focusedPhotoIndex = index
                                     viewModel.toggleSelection(for: photoSet.id)
-                                },
-                                openBigView: {
-                                    viewModel.focusedPhotoIndex = index
-                                    viewModel.openLargeImageViewer()
                                 }
                             )
-                            .id(index)
+                            .id(photoSet.id)
                             .simultaneousGesture(
                                 TapGesture().onEnded {
                                     viewModel.focusedPhotoIndex = index
@@ -61,11 +57,15 @@ struct PhotoGridView: View {
                         }
                     }
                     .padding(.horizontal, 20)
-                    .padding(.vertical, 16)
+                    .padding(.top, 44)
+                    .padding(.bottom, 16)
                 }
                 .onChange(of: viewModel.focusedPhotoIndex) { _, newIndex in
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        scrollProxy.scrollTo(newIndex)
+                    if newIndex >= 0 && newIndex < viewModel.filteredPhotoSets.count {
+                        let targetID = viewModel.filteredPhotoSets[newIndex].id
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            scrollProxy.scrollTo(targetID)
+                        }
                     }
                 }
             }
@@ -81,7 +81,7 @@ struct PhotoGridView: View {
                 ProgressView("Scanning subfolders...")
                     .padding(12)
                     .background(PhotomatorTheme.cellBackground, in: RoundedRectangle(cornerRadius: 8))
-                    .padding(.top, 18)
+                    .padding(.top, 48)
             }
         }
     }

@@ -10,6 +10,10 @@ import SwiftUI
 
 final class UserPreferences: ObservableObject {
     static let shared = UserPreferences()
+    
+    private init() {
+        load()
+    }
 
     @Published var lastSourceDirectoryIDs: [String] = []
     @Published var lastLooseFilePaths: [String] = []
@@ -23,6 +27,7 @@ final class UserPreferences: ObservableObject {
     @Published var tagManagerHotkey: String = "cmd+t"
     @Published var ruleEditorHotkey: String = "cmd+r"
     @Published var openSourceHotkey: String = "cmd+o"
+    @Published var jpegOnlyHotkey: String = "shift+cmd+q"
 
     private enum Keys {
         static let sourceList  = "lastSourceDirectories"
@@ -37,6 +42,7 @@ final class UserPreferences: ObservableObject {
         static let tagManagerHotkey = "tagManagerHotkey"
         static let ruleEditorHotkey = "ruleEditorHotkey"
         static let openSourceHotkey = "openSourceHotkey"
+        static let jpegOnlyHotkey = "jpegOnlyHotkey"
     }
 
     // MARK: - Persistence
@@ -53,9 +59,10 @@ final class UserPreferences: ObservableObject {
         UserDefaults.standard.set(tagManagerHotkey, forKey: Keys.tagManagerHotkey)
         UserDefaults.standard.set(ruleEditorHotkey, forKey: Keys.ruleEditorHotkey)
         UserDefaults.standard.set(openSourceHotkey, forKey: Keys.openSourceHotkey)
+        UserDefaults.standard.set(jpegOnlyHotkey, forKey: Keys.jpegOnlyHotkey)
     }
 
-    func load() {
+    private func load() {
         lastSourceDirectoryIDs = UserDefaults.standard.stringArray(forKey: Keys.sourceList) ?? []
         // Migration:
         if lastSourceDirectoryIDs.isEmpty, let oldSource = UserDefaults.standard.string(forKey: Keys.source) {
@@ -86,6 +93,7 @@ final class UserPreferences: ObservableObject {
         tagManagerHotkey = UserDefaults.standard.string(forKey: Keys.tagManagerHotkey) ?? "cmd+t"
         ruleEditorHotkey = UserDefaults.standard.string(forKey: Keys.ruleEditorHotkey) ?? "cmd+r"
         openSourceHotkey = UserDefaults.standard.string(forKey: Keys.openSourceHotkey) ?? "cmd+o"
+        jpegOnlyHotkey = UserDefaults.standard.string(forKey: Keys.jpegOnlyHotkey) ?? "shift+cmd+q"
     }
 
     func clear() {
@@ -101,6 +109,7 @@ final class UserPreferences: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Keys.tagManagerHotkey)
         UserDefaults.standard.removeObject(forKey: Keys.ruleEditorHotkey)
         UserDefaults.standard.removeObject(forKey: Keys.openSourceHotkey)
+        UserDefaults.standard.removeObject(forKey: Keys.jpegOnlyHotkey)
         
         lastSourceDirectoryIDs = []
         lastLooseFilePaths = []
@@ -113,5 +122,6 @@ final class UserPreferences: ObservableObject {
         tagManagerHotkey = "cmd+t"
         ruleEditorHotkey = "cmd+r"
         openSourceHotkey = "cmd+o"
+        jpegOnlyHotkey = "shift+cmd+q"
     }
 }

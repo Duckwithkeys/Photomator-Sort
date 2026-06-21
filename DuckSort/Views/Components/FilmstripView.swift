@@ -57,19 +57,25 @@ struct FilmstripView: View {
                             .frame(width: 72, height: 48)
                         }
                         .buttonStyle(.plain)
-                        .id(index)
+                        .id(photoSet.id)
                     }
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
             }
             .onChange(of: viewModel.focusedPhotoIndex) { _, newIndex in
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    scrollProxy.scrollTo(newIndex, anchor: .center)
+                if newIndex >= 0 && newIndex < viewModel.filteredPhotoSets.count {
+                    let targetID = viewModel.filteredPhotoSets[newIndex].id
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        scrollProxy.scrollTo(targetID, anchor: .center)
+                    }
                 }
             }
             .onAppear {
-                scrollProxy.scrollTo(viewModel.focusedPhotoIndex, anchor: .center)
+                if viewModel.focusedPhotoIndex >= 0 && viewModel.focusedPhotoIndex < viewModel.filteredPhotoSets.count {
+                    let targetID = viewModel.filteredPhotoSets[viewModel.focusedPhotoIndex].id
+                    scrollProxy.scrollTo(targetID, anchor: .center)
+                }
             }
         }
         .frame(height: 64)

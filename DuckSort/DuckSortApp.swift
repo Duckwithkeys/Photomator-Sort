@@ -16,6 +16,7 @@ struct DuckSortApp: App {
     init() {
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.activate(ignoringOtherApps: true)
+        NSWindow.allowsAutomaticWindowTabbing = false
     }
 
     var body: some Scene {
@@ -26,6 +27,15 @@ struct DuckSortApp: App {
         .commands {
             SidebarCommands()
             TextEditingCommands()
+
+            CommandGroup(after: .sidebar) {
+                Toggle("JPEG Only Mode", isOn: Binding(
+                    get: { windowManager.activeViewModel?.isJpegOnlyMode ?? false },
+                    set: { windowManager.activeViewModel?.isJpegOnlyMode = $0 }
+                ))
+                .optionalKeyboardShortcut(KeyboardShortcutInfo.parse(preferences.jpegOnlyHotkey).keyboardShortcut)
+                .disabled(!windowManager.isReady)
+            }
 
             CommandGroup(after: .newItem) {
                 Button("Add Source Folder...") {

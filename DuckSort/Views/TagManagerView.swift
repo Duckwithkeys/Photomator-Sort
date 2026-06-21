@@ -20,7 +20,19 @@ struct TagManagerView: View {
     @State private var newTagCategoryID: UUID?
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 0) {            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 20) {
+                    ForEach(tagStore.categories) { category in
+                        categorySection(category)
+                    }
+
+                    addCategoryRow
+                }
+                .padding(20)
+            }
+            
+            Divider()
+            
             HStack {
                 Button(action: importContacts) {
                     Label("Import Contacts...", systemImage: "person.crop.circle.badge.plus")
@@ -34,20 +46,7 @@ struct TagManagerView: View {
                     .keyboardShortcut(.cancelAction)
                     .hidden()
             }
-            .padding()
-
-            Divider()
-
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 20) {
-                    ForEach(tagStore.categories) { category in
-                        categorySection(category)
-                    }
-
-                    addCategoryRow
-                }
-                .padding(20)
-            }
+            .padding(12)
         }
         .frame(minWidth: 640, minHeight: 520)
         .background(.ultraThinMaterial)
@@ -75,8 +74,11 @@ struct TagManagerView: View {
                     tagStore.deleteCategory(id: category.id)
                 } label: {
                     Image(systemName: "trash")
+                        .foregroundStyle(.secondary)
+                        .padding(6)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .help("Delete category and all its tags")
             }
 

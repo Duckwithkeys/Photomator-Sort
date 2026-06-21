@@ -12,7 +12,6 @@ import Foundation
 enum RoutedOperation: String, CaseIterable, Identifiable, Sendable {
     case copyOriginals
     case moveOriginals
-    case exportJPEGs
 
     var id: String { rawValue }
 
@@ -20,7 +19,6 @@ enum RoutedOperation: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .copyOriginals:  return "Copy Originals"
         case .moveOriginals:  return "Move Originals"
-        case .exportJPEGs:    return "Export JPEGs"
         }
     }
 
@@ -28,7 +26,6 @@ enum RoutedOperation: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .copyOriginals:  return "doc.on.doc"
         case .moveOriginals:  return "folder"
-        case .exportJPEGs:    return "photo.on.rectangle"
         }
     }
 
@@ -36,7 +33,6 @@ enum RoutedOperation: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .copyOriginals:  return "Copying"
         case .moveOriginals:  return "Moving"
-        case .exportJPEGs:    return "Exporting JPEGs"
         }
     }
 
@@ -44,7 +40,6 @@ enum RoutedOperation: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .copyOriginals:  return "c"
         case .moveOriginals:  return "m"
-        case .exportJPEGs:    return "e"
         }
     }
 }

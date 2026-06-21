@@ -64,7 +64,7 @@ final class FloatingWindowManager: ObservableObject {
     
     func showTagManager(viewModel: PhotoLibraryViewModel) {
         if let panel = tagManagerPanel {
-            panel.makeKeyAndOrderFront(nil)
+            panel.close()
             return
         }
         
@@ -92,7 +92,7 @@ final class FloatingWindowManager: ObservableObject {
     
     func showRuleEditor(viewModel: PhotoLibraryViewModel) {
         if let panel = ruleEditorPanel {
-            panel.makeKeyAndOrderFront(nil)
+            panel.close()
             return
         }
         
@@ -120,25 +120,25 @@ final class FloatingWindowManager: ObservableObject {
     
     func showShortcutsViewer(viewModel: PhotoLibraryViewModel) {
         if let panel = shortcutsPanel {
-            panel.makeKeyAndOrderFront(nil)
+            panel.close()
             return
         }
         
-        // Wrap the ShortcutsPopoverView in a ScrollView to fit nicely
-        let view = ScrollView {
-            ShortcutsPopoverView(viewModel: viewModel) { [weak self] in
-                self?.shortcutsPanel?.close()
-            }
+        let view = ShortcutsPopoverView(viewModel: viewModel) { [weak self] in
+            self?.shortcutsPanel?.close()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         
         let panel = FloatingPanel(
             title: "Keyboard Shortcuts",
             content: view,
             width: 340,
-            height: 480,
-            isResizable: true
+            height: 10,
+            isResizable: false
         )
+        
+        if let cv = panel.contentView {
+            panel.setContentSize(NSSize(width: 340, height: min(cv.fittingSize.height, 600)))
+        }
         
         panel.minSize = NSSize(width: 320, height: 360)
         

@@ -11,7 +11,6 @@ struct PhotoSetCell: View {
     let isFocusedGridItem: Bool
     let isJpegOnlyMode: Bool
     let toggleSelection: () -> Void
-    let openBigView: () -> Void
     @State private var isHovered = false
 
     private var statusColor: Color {
@@ -62,24 +61,6 @@ struct PhotoSetCell: View {
                         .background(.black.opacity(0.5), in: Capsule())
                         .padding(8)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                    }
-
-                    if isHovered {
-                        Image(systemName: "info.circle.fill")
-                            .font(.title3)
-                            .foregroundStyle(.white)
-                            .padding(6)
-                            .background(.ultraThinMaterial, in: Circle())
-                            .shadow(color: .black.opacity(0.2), radius: 2)
-                            .highPriorityGesture(
-                                TapGesture().onEnded {
-                                    openBigView()
-                                }
-                            )
-                            .transition(.opacity.combined(with: .scale))
-                            .padding(8)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                            .help("Open large image viewer")
                     }
                 }
 

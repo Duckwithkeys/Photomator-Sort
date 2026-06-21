@@ -58,20 +58,6 @@ actor RoutedTransferService {
                     totalBytes += size * Int64(multiplier)
                 }
             }
-        case .exportJPEGs:
-            for routed in plan.photos {
-                guard let previewURL = routed.photoSet.preferredPreviewURL else { continue }
-                let folders = ExportPathRouter.destinationFolders(
-                    base: plan.baseDestination,
-                    rule: plan.rule,
-                    metadata: routed.metadata,
-                    assignedTags: routed.tags,
-                    categoryNameProvider: categoryNameProvider
-                )
-                totalFiles += folders.count
-                let size = (try? fm.attributesOfItem(atPath: previewURL.path)[.size] as? Int64) ?? 0
-                totalBytes += size * Int64(folders.count)
-            }
         }
 
         let startTime = Date()
@@ -211,48 +197,6 @@ actor RoutedTransferService {
                             try? fm.removeItem(at: orphan)
                         }
                     }
-                }
-                
-            case .exportJPEGs:
-                guard let sourceURL = routed.photoSet.preferredPreviewURL else { continue }
-                let metadata = metadataReader.metadata(for: sourceURL)
-                
-                for folder in folders {
-                    try Task.checkCancellation()
-                    let fileName = exportFileName(
-                        base: routed.photoSet.baseName,
-                        metadata: metadata,
-                        sequence: photoSequence,
-                        preset: plan.namingPreset
-                    )
-                    let dest = uniqueDestinationURL(
-                        forFileName: fileName, in: folder, fileManager: fm
-                    )
-                    let tagNames = Set(routed.tags.map(\.name))
-                    try writeJPEG(from: sourceURL, to: dest, quality: plan.jpegQuality, tagNames: tagNames)
-                    let sourceSidecar = XMPTaggingService.exportSidecarURL(for: sourceURL)
-                    await writeSidecar(
-                        tagNames: tagNames,
-                        capture: metadata,
-                        besideDestination: dest,
-                        mergingSourceSidecar: sourceSidecar,
-                        failures: &sidecarFailures
-                    )
-
-                    let fileSize = (try? fm.attributesOfItem(atPath: sourceURL.path)[.size] as? Int64) ?? 0
-                    processed += 1
-                    completedBytes += fileSize
-                    let elapsed = Date().timeIntervalSince(startTime)
-                    let bps = elapsed > 0 ? Double(completedBytes) / elapsed : 0
-                    
-                    await progress?(FileOperationProgress(
-                        completed: processed,
-                        total: totalFiles,
-                        currentName: dest.lastPathComponent,
-                        completedBytes: completedBytes,
-                        totalBytes: totalBytes,
-                        bytesPerSecond: bps
-                    ))
                 }
             }
         }

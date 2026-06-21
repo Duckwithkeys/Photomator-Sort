@@ -18,18 +18,6 @@ struct ExportRuleEditorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Spacer()
-                Button("Done", action: onClose)
-                    .keyboardShortcut(.defaultAction)
-                Button("", action: onClose)
-                    .keyboardShortcut(.cancelAction)
-                    .hidden()
-            }
-            .padding()
-
-            Divider()
-
             HSplitView {
                 ruleList
                     .frame(minWidth: 220, idealWidth: 260, maxWidth: 320)
@@ -46,6 +34,18 @@ struct ExportRuleEditorView: View {
                     .frame(minWidth: 460)
                 }
             }
+            
+            Divider()
+            
+            HStack {
+                Spacer()
+                Button("Done", action: onClose)
+                    .keyboardShortcut(.defaultAction)
+                Button("", action: onClose)
+                    .keyboardShortcut(.cancelAction)
+                    .hidden()
+            }
+            .padding(12)
         }
         .frame(minWidth: 820, minHeight: 540)
         .background(.ultraThinMaterial)

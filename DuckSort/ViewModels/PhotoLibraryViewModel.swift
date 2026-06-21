@@ -39,6 +39,8 @@ final class PhotoLibraryViewModel: ObservableObject {
         }
     }
     @Published var selectedTagFilters: Set<UUID> = []
+    @Published var selectedFlags: Set<Int> = []
+    @Published var selectedRatings: Set<Int> = []
     @Published var namingPreset: ExportNamingPreset = .dateOriginalSequence {
         didSet {
             guard !isInitializing else { return }
@@ -119,7 +121,6 @@ final class PhotoLibraryViewModel: ObservableObject {
             }
             .store(in: &cancellables)
         
-        UserPreferences.shared.load()
         self.filterRule = UserPreferences.shared.lastFilterRule
         self.namingPreset = UserPreferences.shared.lastNamingPreset
         self.jpegQuality = UserPreferences.shared.lastJpegQuality
@@ -137,6 +138,7 @@ final class PhotoLibraryViewModel: ObservableObject {
         self.tagManagerHotkey = UserPreferences.shared.tagManagerHotkey
         self.ruleEditorHotkey = UserPreferences.shared.ruleEditorHotkey
         self.openSourceHotkey = UserPreferences.shared.openSourceHotkey
+        self.jpegOnlyHotkey = UserPreferences.shared.jpegOnlyHotkey
         
         self.isInitializing = false
         
@@ -165,6 +167,15 @@ final class PhotoLibraryViewModel: ObservableObject {
         var list = photoSets.filter { filterRule.matches($0) }
         if !selectedTagFilters.isEmpty {
             list = list.filter { !selectedTagFilters.isDisjoint(with: tagStore.assignedTagIDs(for: $0.id)) }
+        }
+        if !selectedFlags.isEmpty {
+            list = list.filter { selectedFlags.contains($0.pick ?? 0) }
+        }
+        if !selectedRatings.isEmpty {
+            list = list.filter {
+                let ratingVal = $0.rating ?? 0
+                return selectedRatings.contains(ratingVal)
+            }
         }
         return list
     }
@@ -429,6 +440,22 @@ final class PhotoLibraryViewModel: ObservableObject {
         }
     }
     
+    func toggleFlagFilter(_ flag: Int) {
+        if selectedFlags.contains(flag) {
+            selectedFlags.remove(flag)
+        } else {
+            selectedFlags.insert(flag)
+        }
+    }
+
+    func toggleRatingFilter(_ rating: Int) {
+        if selectedRatings.contains(rating) {
+            selectedRatings.remove(rating)
+        } else {
+            selectedRatings.insert(rating)
+        }
+    }
+
     // MARK: - Selection
     
     func toggleSelection(for id: PhotoSet.ID) {
@@ -803,6 +830,7 @@ final class PhotoLibraryViewModel: ObservableObject {
 
     @Published var tagManagerHotkey: String? = "cmd+t" {
         didSet {
+            guard !isInitializing else { return }
             UserPreferences.shared.tagManagerHotkey = tagManagerHotkey ?? ""
             UserPreferences.shared.save()
         }
@@ -810,6 +838,7 @@ final class PhotoLibraryViewModel: ObservableObject {
 
     @Published var ruleEditorHotkey: String? = "cmd+r" {
         didSet {
+            guard !isInitializing else { return }
             UserPreferences.shared.ruleEditorHotkey = ruleEditorHotkey ?? ""
             UserPreferences.shared.save()
         }
@@ -817,7 +846,16 @@ final class PhotoLibraryViewModel: ObservableObject {
 
     @Published var openSourceHotkey: String? = "cmd+o" {
         didSet {
+            guard !isInitializing else { return }
             UserPreferences.shared.openSourceHotkey = openSourceHotkey ?? ""
+            UserPreferences.shared.save()
+        }
+    }
+
+    @Published var jpegOnlyHotkey: String? = "shift+cmd+q" {
+        didSet {
+            guard !isInitializing else { return }
+            UserPreferences.shared.jpegOnlyHotkey = jpegOnlyHotkey ?? ""
             UserPreferences.shared.save()
         }
     }
@@ -834,6 +872,11 @@ final class PhotoLibraryViewModel: ObservableObject {
 
     var openSourceShortcutInfo: KeyboardShortcutInfo? {
         guard let hotkey = openSourceHotkey, !hotkey.isEmpty else { return nil }
+        return KeyboardShortcutInfo.parse(hotkey)
+    }
+
+    var jpegOnlyShortcutInfo: KeyboardShortcutInfo? {
+        guard let hotkey = jpegOnlyHotkey, !hotkey.isEmpty else { return nil }
         return KeyboardShortcutInfo.parse(hotkey)
     }
     

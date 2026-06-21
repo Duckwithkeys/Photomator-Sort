@@ -9,7 +9,6 @@ import AppKit
 struct ContentView: View {
     @StateObject private var viewModel = PhotoLibraryViewModel()
 
-    @State private var showSourcesPopover = false
     @State private var isDropTargeted = false
 
     var body: some View {
@@ -18,40 +17,36 @@ struct ContentView: View {
                 SidebarView(viewModel: viewModel)
                 
                 VStack(spacing: 0) {
-                    customTopBar
-                        .zIndex(1)
-                    
-                    VStack(spacing: 12) {
-                        if viewModel.photoSets.isEmpty {
-                            EmptyLibraryView(isScanning: viewModel.isScanning) {
-                                viewModel.importItems()
-                            }
-                        } else {
-                            PhotoGridView(viewModel: viewModel)
+                    if viewModel.photoSets.isEmpty {
+                        EmptyLibraryView(isScanning: viewModel.isScanning) {
+                            viewModel.importItems()
                         }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        PhotoGridView(viewModel: viewModel)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
 
-                        TransferFooter(viewModel: viewModel)
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(PhotomatorTheme.background)
-                    .dropDestination(for: URL.self) { urls, _ in
-                        viewModel.importURLs(urls)
-                        return !urls.isEmpty
-                    } isTargeted: { targeted in
-                        isDropTargeted = targeted
-                    }
-                    .overlay {
-                        if isDropTargeted {
-                            RoundedRectangle(cornerRadius: 8)
-                                .strokeBorder(PhotomatorTheme.selectedBlue, style: StrokeStyle(lineWidth: 3, dash: [8]))
-                                .padding(6)
-                                .allowsHitTesting(false)
-                                .transition(.opacity)
-                        }
-                    }
-                    .animation(.easeInOut(duration: 0.15), value: isDropTargeted)
+                    TransferFooter(viewModel: viewModel)
                 }
+                .background(PhotomatorTheme.background)
+                .dropDestination(for: URL.self) { urls, _ in
+                    viewModel.importURLs(urls)
+                    return !urls.isEmpty
+                } isTargeted: { targeted in
+                    isDropTargeted = targeted
+                }
+                .overlay {
+                    if isDropTargeted {
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(PhotomatorTheme.selectedBlue, style: StrokeStyle(lineWidth: 3, dash: [8]))
+                            .padding(6)
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.15), value: isDropTargeted)
             }
         }
         .frame(minWidth: 920, minHeight: 640)
@@ -78,76 +73,6 @@ struct ContentView: View {
             }
         }
         .ignoresSafeArea(.container, edges: .top)
-    }
-
-    private var customTopBar: some View {
-        HStack(spacing: 12) {
-            Text("DuckSort")
-                .font(.headline.weight(.semibold))
-                .padding(.trailing, 4)
-
-            Button {
-                showSourcesPopover = true
-            } label: {
-                Label(
-                    viewModel.sourceDirectories.isEmpty
-                        ? "Add Source"
-                        : "\(viewModel.sourceDirectories.count) Source\(viewModel.sourceDirectories.count == 1 ? "" : "s")",
-                    systemImage: "photo.on.rectangle.angled"
-                )
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .liquidGlassButton(isHovered: false)
-            }
-            .buttonStyle(.plain)
-            .popover(isPresented: $showSourcesPopover, arrowEdge: .bottom) {
-                SourceFoldersPopoverView(viewModel: viewModel)
-            }
-
-            Button {
-                viewModel.clearSelection()
-            } label: {
-                Label("Unselect All", systemImage: "checkmark.circle.badge.xmark")
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .liquidGlassButton(isHovered: false)
-            }
-            .buttonStyle(.plain)
-            .disabled(viewModel.selectedCount == 0)
-
-            Spacer()
-
-            Button {
-                viewModel.isJpegOnlyMode.toggle()
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: viewModel.isJpegOnlyMode ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(viewModel.isJpegOnlyMode ? .blue : .secondary)
-                    Text("JPEG Only")
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .liquidGlassButton(isHovered: false, isApplied: viewModel.isJpegOnlyMode)
-            }
-            .buttonStyle(.plain)
-            .help("Only scan JPEGs and disable edit warnings")
-
-        }
-        .padding(.leading, 16)
-        .padding(.trailing, 12)
-        .padding(.top, 16)
-        .padding(.bottom, 8)
-        .background(
-            Rectangle()
-                .fill(PhotomatorTheme.toolbarBackground)
-                .ignoresSafeArea()
-        )
-        .overlay(
-            Rectangle()
-                .frame(height: 1)
-                .foregroundStyle(PhotomatorTheme.separator),
-            alignment: .bottom
-        )
     }
 
     private var errorBinding: Binding<Bool> {
@@ -326,6 +251,20 @@ struct ContentView: View {
             viewModel.focusedPhotoIndex = min(count - 1, viewModel.focusedPhotoIndex + cols)
             return true
 
+        case 53: // Escape
+            if viewModel.selectedCount > 0 {
+                viewModel.clearSelection()
+                return true
+            }
+            return false
+
+        case 51, 117: // Backspace (51) / Forward Delete (117)
+            if viewModel.selectedCount > 0 {
+                viewModel.clearSelection()
+                return true
+            }
+            return false
+
         case 36, 49: // Return (36) or Space (49)
             viewModel.openLargeImageViewer()
             return true
@@ -411,7 +350,93 @@ struct ShortcutsPopoverView: View {
     var onClose: () -> Void = {}
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 14) {
+                // Section 1: General App Shortcuts (Editable!)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("APP ACTIONS")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Text("Add Source Folder")
+                        Spacer()
+                        ShortcutRecorderView(hotkey: $viewModel.openSourceHotkey)
+                    }
+
+                    HStack {
+                        Text("Open Tag Manager")
+                        Spacer()
+                        ShortcutRecorderView(hotkey: $viewModel.tagManagerHotkey)
+                    }
+
+                    HStack {
+                        Text("Open Routing Rules")
+                        Spacer()
+                        ShortcutRecorderView(hotkey: $viewModel.ruleEditorHotkey)
+                    }
+
+                    HStack {
+                        Text("Toggle JPEG Only Mode")
+                        Spacer()
+                        ShortcutRecorderView(hotkey: $viewModel.jpegOnlyHotkey)
+                    }
+                }
+
+                Divider()
+
+                // Section 2: Culling Shortcuts Reference (Static)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("CULLING CONTROL")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .padding(.bottom, 2)
+
+                    shortcutRow(label: "Toggle Selection", shortcut: "S")
+                    shortcutRow(label: "Clear All Tags", shortcut: "0")
+                    shortcutRow(label: "Close Large Viewer", shortcut: "Esc")
+                    shortcutRow(label: "Navigate Photos", shortcut: "← / → / ↑ / ↓")
+                    shortcutRow(label: "Next/Prev Category", shortcut: "Tab / ⇧Tab")
+                    shortcutRow(label: "Select Visible (Grid)", shortcut: "⌘A")
+                }
+
+                if !viewModel.tagStore.tags.isEmpty {
+                    Divider()
+
+                    // Section 3: Tag Hotkeys Reference
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("TAG HOTKEYS")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                            .padding(.bottom, 2)
+
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(viewModel.tagStore.tags) { tag in
+                                    if let shortcut = tag.shortcutInfo {
+                                        HStack {
+                                            HStack(spacing: 6) {
+                                                Circle()
+                                                    .fill(tag.color)
+                                                    .frame(width: 6, height: 6)
+                                                Text(tag.name)
+                                                    .font(.subheadline)
+                                            }
+                                            Spacer()
+                                            Text(shortcut.displayString)
+                                                .font(.system(.caption, design: .monospaced))
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(20)
+            
+            Divider()
             HStack {
                 Spacer()
                 Button("Done", action: onClose)
@@ -420,86 +445,9 @@ struct ShortcutsPopoverView: View {
                     .keyboardShortcut(.cancelAction)
                     .hidden()
             }
-            .padding(.bottom, 2)
-
-            // Section 1: General App Shortcuts (Editable!)
-            VStack(alignment: .leading, spacing: 8) {
-                Text("APP ACTIONS")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-
-                HStack {
-                    Text("Add Source Folder")
-                    Spacer()
-                    ShortcutRecorderView(hotkey: $viewModel.openSourceHotkey)
-                }
-
-                HStack {
-                    Text("Open Tag Manager")
-                    Spacer()
-                    ShortcutRecorderView(hotkey: $viewModel.tagManagerHotkey)
-                }
-
-                HStack {
-                    Text("Open Routing Rules")
-                    Spacer()
-                    ShortcutRecorderView(hotkey: $viewModel.ruleEditorHotkey)
-                }
-            }
-
-            Divider()
-
-            // Section 2: Culling Shortcuts Reference (Static)
-            VStack(alignment: .leading, spacing: 6) {
-                Text("CULLING CONTROL")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-                    .padding(.bottom, 2)
-
-                shortcutRow(label: "Toggle Selection", shortcut: "S")
-                shortcutRow(label: "Clear All Tags", shortcut: "0")
-                shortcutRow(label: "Close Large Viewer", shortcut: "Esc")
-                shortcutRow(label: "Navigate Photos", shortcut: "← / → / ↑ / ↓")
-                shortcutRow(label: "Next/Prev Category", shortcut: "Tab / ⇧Tab")
-                shortcutRow(label: "Select Visible (Grid)", shortcut: "⌘A")
+            .padding(12)
         }
-
-            if !viewModel.tagStore.tags.isEmpty {
-                Divider()
-
-                // Section 3: Tag Hotkeys Reference
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("TAG HOTKEYS")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
-                        .padding(.bottom, 2)
-
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 6) {
-                            ForEach(viewModel.tagStore.tags) { tag in
-                                if let shortcut = tag.shortcutInfo {
-                                    HStack {
-                                        HStack(spacing: 6) {
-                                            Circle()
-                                                .fill(tag.color)
-                                                .frame(width: 6, height: 6)
-                                            Text(tag.name)
-                                                .font(.subheadline)
-                                        }
-                                        Spacer()
-                                        Text(shortcut.displayString)
-                                            .font(.system(.caption, design: .monospaced))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        .padding(20)
-        .frame(minWidth: 320, idealWidth: 360, maxWidth: .infinity, minHeight: 400, idealHeight: 480, maxHeight: .infinity, alignment: .topLeading)
+        .frame(width: 340)
     }
 
     private func shortcutRow(label: String, shortcut: String) -> some View {

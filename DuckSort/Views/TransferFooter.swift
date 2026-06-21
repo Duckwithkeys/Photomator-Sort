@@ -7,7 +7,6 @@ import SwiftUI
 
 struct TransferFooter: View {
     @ObservedObject var viewModel: PhotoLibraryViewModel
-    @State private var showExportConfigurator = false
     @State private var isDestHovered = false
     @State private var hoveredOp: RoutedOperation? = nil
 
@@ -50,11 +49,7 @@ struct TransferFooter: View {
 
                 ForEach(RoutedOperation.allCases) { op in
                     Button {
-                        if op == .exportJPEGs {
-                            showExportConfigurator = true
-                        } else {
-                            viewModel.performRoutedOperation(op)
-                        }
+                        viewModel.performRoutedOperation(op)
                     } label: {
                         Label(op.displayName, systemImage: op.systemImage)
                             .padding(.horizontal, 10)
@@ -104,9 +99,6 @@ struct TransferFooter: View {
                 .foregroundStyle(PhotomatorTheme.separator),
             alignment: .top
         )
-        .sheet(isPresented: $showExportConfigurator) {
-            JPEGExportConfiguratorSheet(viewModel: viewModel)
-        }
     }
 
     @ViewBuilder
