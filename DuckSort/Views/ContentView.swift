@@ -263,10 +263,31 @@ struct ContentView: View {
                     return true
                 }
 
-                if isPlainKey, char == "0" {
+                // Rating
+                if let rating = Int(String(char)), rating >= 0, rating <= 5 {
                     if let photo = viewModel.currentFocusedPhotoSet {
-                        viewModel.clearTags(for: photo.id)
+                        if rating == 0 {
+                            viewModel.clearTags(for: photo.id)
+                            viewModel.setRating(nil, for: photo.id)
+                            viewModel.setPick(0, for: photo.id)
+                        } else {
+                            viewModel.setRating(rating, for: photo.id)
+                        }
                     }
+                    return true
+                }
+
+                // Pick
+                if char == "z" || char == "Z" {
+                    if let photo = viewModel.currentFocusedPhotoSet { viewModel.setPick(1, for: photo.id) }
+                    return true
+                }
+                if char == "x" || char == "X" {
+                    if let photo = viewModel.currentFocusedPhotoSet { viewModel.setPick(-1, for: photo.id) }
+                    return true
+                }
+                if char == "u" || char == "U" {
+                    if let photo = viewModel.currentFocusedPhotoSet { viewModel.setPick(0, for: photo.id) }
                     return true
                 }
 
@@ -329,10 +350,40 @@ struct ContentView: View {
                     return true
                 }
 
-                if isPlainKey, char == "0" {
+                // Rating
+                if let rating = Int(String(char)), rating >= 0, rating <= 5 {
                     if viewModel.focusedPhotoIndex >= 0 && viewModel.focusedPhotoIndex < count {
                         let photo = viewModel.filteredPhotoSets[viewModel.focusedPhotoIndex]
-                        viewModel.clearTags(for: photo.id)
+                        if rating == 0 {
+                            viewModel.clearTags(for: photo.id)
+                            viewModel.setRating(nil, for: photo.id)
+                            viewModel.setPick(0, for: photo.id)
+                        } else {
+                            viewModel.setRating(rating, for: photo.id)
+                        }
+                    }
+                    return true
+                }
+
+                // Pick
+                if char == "z" || char == "Z" {
+                    if viewModel.focusedPhotoIndex >= 0 && viewModel.focusedPhotoIndex < count {
+                        let photo = viewModel.filteredPhotoSets[viewModel.focusedPhotoIndex]
+                        viewModel.setPick(1, for: photo.id)
+                    }
+                    return true
+                }
+                if char == "x" || char == "X" {
+                    if viewModel.focusedPhotoIndex >= 0 && viewModel.focusedPhotoIndex < count {
+                        let photo = viewModel.filteredPhotoSets[viewModel.focusedPhotoIndex]
+                        viewModel.setPick(-1, for: photo.id)
+                    }
+                    return true
+                }
+                if char == "u" || char == "U" {
+                    if viewModel.focusedPhotoIndex >= 0 && viewModel.focusedPhotoIndex < count {
+                        let photo = viewModel.filteredPhotoSets[viewModel.focusedPhotoIndex]
+                        viewModel.setPick(0, for: photo.id)
                     }
                     return true
                 }

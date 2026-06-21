@@ -45,6 +45,7 @@ struct LargeImagePane: View {
                                 .offset(panOffset)
                                 .blur(radius: 12)
                                 .opacity(0.8)
+                                .grayscale(photoSet.pick == -1 ? 0.8 : 0)
                         }
                         
                         if let highRes = highResImage {
@@ -55,6 +56,7 @@ struct LargeImagePane: View {
                                 .scaleEffect(zoomScale + currentAmount)
                                 .offset(panOffset)
                                 .transition(.opacity)
+                                .grayscale(photoSet.pick == -1 ? 0.8 : 0)
                         }
                     }
                     .frame(width: geometry.size.width, height: geometry.size.height)

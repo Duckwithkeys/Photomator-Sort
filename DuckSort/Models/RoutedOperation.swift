@@ -87,4 +87,5 @@ struct RoutedSummary: Sendable {
     let fileCount: Int
     let baseDestination: URL
     let foldersCreated: Int
+    let sidecarFailures: Int
 }

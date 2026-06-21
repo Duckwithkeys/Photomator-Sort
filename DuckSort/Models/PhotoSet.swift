@@ -29,6 +29,12 @@ struct PhotoSet: Identifiable, Hashable, Sendable {
 
     /// Whether the user has selected this PhotoSet in the grid.
     var isSelected: Bool = false
+    
+    /// User's star rating (1-5, or 0/nil for unrated)
+    var rating: Int? = nil
+    
+    /// User's flag/pick status (-1 = reject, 0 = unflagged, 1 = flagged)
+    var pick: Int? = nil
 
     // MARK: - Computed properties
 
@@ -75,11 +81,21 @@ struct PhotoSet: Identifiable, Hashable, Sendable {
     // MARK: - Hashable / Equatable
 
     nonisolated static func == (lhs: PhotoSet, rhs: PhotoSet) -> Bool {
-        lhs.id == rhs.id
+        lhs.id == rhs.id &&
+        lhs.isSelected == rhs.isSelected &&
+        lhs.rating == rhs.rating &&
+        lhs.pick == rhs.pick &&
+        lhs.mediaFiles == rhs.mediaFiles &&
+        lhs.editPath == rhs.editPath
     }
 
     nonisolated func hash(into hasher: inout Hasher) {
         hasher.combine(id)
+        hasher.combine(isSelected)
+        hasher.combine(rating)
+        hasher.combine(pick)
+        hasher.combine(mediaFiles)
+        hasher.combine(editPath)
     }
 
     private static func previewRank(for url: URL) -> Int {

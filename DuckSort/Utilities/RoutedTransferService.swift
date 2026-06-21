@@ -14,6 +14,7 @@ import UniformTypeIdentifiers
 actor RoutedTransferService {
 
     private let metadataReader = MetadataReader()
+    private let sidecarService = XMPTaggingService()
 
     func execute(
         _ plan: RoutedPlan,
@@ -29,7 +30,8 @@ actor RoutedTransferService {
                 operation: plan.operation,
                 fileCount: 0,
                 baseDestination: plan.baseDestination,
-                foldersCreated: 0
+                foldersCreated: 0,
+                sidecarFailures: 0
             )
         }
 
@@ -37,6 +39,7 @@ actor RoutedTransferService {
         var totalBytes: Int64 = 0
         var processed = 0
         var foldersCreated = 0
+        var sidecarFailures = 0
 
         switch plan.operation {
         case .copyOriginals, .moveOriginals:
@@ -118,6 +121,17 @@ actor RoutedTransferService {
                             continue
                         }
                         try fm.copyItem(at: sourceURL, to: dest)
+                        if routed.photoSet.mediaFiles.map(\.standardizedFileURL)
+                            .contains(sourceURL.standardizedFileURL) {
+                            let sourceSidecar = XMPTaggingService.exportSidecarURL(for: sourceURL)
+                            await writeSidecar(
+                                tagNames: Set(routed.tags.map(\.name)),
+                                capture: routed.metadata,
+                                besideDestination: dest,
+                                mergingSourceSidecar: sourceSidecar,
+                                failures: &sidecarFailures
+                            )
+                        }
                         processed += 1
                         completedBytes += fileSize
                         let elapsed = Date().timeIntervalSince(startTime)
@@ -159,6 +173,17 @@ actor RoutedTransferService {
                             continue
                         }
                         try fm.copyItem(at: sourceURL, to: dest)
+                        if routed.photoSet.mediaFiles.map(\.standardizedFileURL)
+                            .contains(sourceURL.standardizedFileURL) {
+                            let sourceSidecar = XMPTaggingService.exportSidecarURL(for: sourceURL)
+                            await writeSidecar(
+                                tagNames: Set(routed.tags.map(\.name)),
+                                capture: routed.metadata,
+                                besideDestination: dest,
+                                mergingSourceSidecar: sourceSidecar,
+                                failures: &sidecarFailures
+                            )
+                        }
                         processed += 1
                         completedBytes += fileSize
                         let elapsed = Date().timeIntervalSince(startTime)
@@ -173,11 +198,18 @@ actor RoutedTransferService {
                         ))
                     }
                 }
-                
-                // Now clean up original source files since they have been copied to all destinations
+
+                // Now clean up original source files and sidecars since they have been copied to all destinations
                 for sourceURL in routed.photoSet.allFiles {
                     if fm.fileExists(atPath: sourceURL.path) {
                         try fm.removeItem(at: sourceURL)
+                    }
+                    if routed.photoSet.mediaFiles.map(\.standardizedFileURL)
+                        .contains(sourceURL.standardizedFileURL) {
+                        let orphan = XMPTaggingService.exportSidecarURL(for: sourceURL)
+                        if fm.fileExists(atPath: orphan.path) {
+                            try? fm.removeItem(at: orphan)
+                        }
                     }
                 }
                 
@@ -196,8 +228,17 @@ actor RoutedTransferService {
                     let dest = uniqueDestinationURL(
                         forFileName: fileName, in: folder, fileManager: fm
                     )
-                    try writeJPEG(from: sourceURL, to: dest, quality: plan.jpegQuality)
-                    
+                    let tagNames = Set(routed.tags.map(\.name))
+                    try writeJPEG(from: sourceURL, to: dest, quality: plan.jpegQuality, tagNames: tagNames)
+                    let sourceSidecar = XMPTaggingService.exportSidecarURL(for: sourceURL)
+                    await writeSidecar(
+                        tagNames: tagNames,
+                        capture: metadata,
+                        besideDestination: dest,
+                        mergingSourceSidecar: sourceSidecar,
+                        failures: &sidecarFailures
+                    )
+
                     let fileSize = (try? fm.attributesOfItem(atPath: sourceURL.path)[.size] as? Int64) ?? 0
                     processed += 1
                     completedBytes += fileSize
@@ -220,13 +261,35 @@ actor RoutedTransferService {
             operation: plan.operation,
             fileCount: processed,
             baseDestination: plan.baseDestination,
-            foldersCreated: foldersCreated
+            foldersCreated: foldersCreated,
+            sidecarFailures: sidecarFailures
         )
+    }
+
+    // MARK: - Sidecar writing
+
+    private func writeSidecar(
+        tagNames: Set<String>,
+        capture: MetadataSnapshot,
+        besideDestination dest: URL,
+        mergingSourceSidecar sourceSidecarURL: URL? = nil,
+        failures: inout Int
+    ) async {
+        let payload = SidecarPayload(tagNames: tagNames, capture: capture)
+        do {
+            try await sidecarService.writeExportSidecar(
+                payload,
+                besideDestinationFile: dest,
+                mergingSourceSidecar: sourceSidecarURL
+            )
+        } catch {
+            failures += 1
+        }
     }
 
     // MARK: - JPEG writing
 
-    private func writeJPEG(from sourceURL: URL, to destinationURL: URL, quality: Double) throws {
+    private func writeJPEG(from sourceURL: URL, to destinationURL: URL, quality: Double, tagNames: Set<String>) throws {
         guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
               let destination = CGImageDestinationCreateWithURL(
@@ -241,6 +304,7 @@ actor RoutedTransferService {
         let sourceProperties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] ?? [:]
         var destinationProperties = sourceProperties
         destinationProperties[kCGImageDestinationLossyCompressionQuality] = quality
+        destinationProperties = XMPTaggingService.mergingKeywords(tagNames, into: destinationProperties)
 
         CGImageDestinationAddImage(destination, image, destinationProperties as CFDictionary)
         guard CGImageDestinationFinalize(destination) else {

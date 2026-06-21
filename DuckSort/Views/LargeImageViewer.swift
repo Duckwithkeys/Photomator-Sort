@@ -79,6 +79,22 @@ struct LargeImageViewer: View {
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.white.opacity(0.9))
                 .lineLimit(1)
+                
+            if photo.pick == 1 || photo.pick == -1 {
+                Image(systemName: photo.pick == 1 ? "flag.fill" : "flag.slash.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(photo.pick == 1 ? .white : .red)
+            }
+            
+            if let rating = photo.rating, rating > 0 {
+                HStack(spacing: 2) {
+                    Image(systemName: "star.fill")
+                        .foregroundStyle(.yellow)
+                    Text("\(rating)")
+                }
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
+            }
 
             Spacer()
 

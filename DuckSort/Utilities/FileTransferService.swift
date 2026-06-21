@@ -32,6 +32,19 @@ struct TransferPlan: Sendable {
     let operation: TransferOperation
     let destinationDirectory: URL
     let photoSets: [PhotoSet]
+    let tagNames: [UUID: Set<String>]
+
+    init(
+        operation: TransferOperation,
+        destinationDirectory: URL,
+        photoSets: [PhotoSet],
+        tagNames: [UUID: Set<String>] = [:]
+    ) {
+        self.operation = operation
+        self.destinationDirectory = destinationDirectory
+        self.photoSets = photoSets
+        self.tagNames = tagNames
+    }
 
     var files: [URL] {
         photoSets.flatMap(\.allFiles)
@@ -42,9 +55,13 @@ struct TransferSummary: Sendable {
     let operation: TransferOperation
     let fileCount: Int
     let destinationDirectory: URL
+    let sidecarFailures: Int
 }
 
 actor FileTransferService {
+    private let sidecarService = XMPTaggingService()
+    private let metadataReader = MetadataReader()
+
     func execute(
         _ plan: TransferPlan,
         progress: (@Sendable (FileOperationProgress) async -> Void)? = nil
@@ -69,18 +86,47 @@ actor FileTransferService {
         let startTime = Date()
         var completedBytes: Int64 = 0
 
-        for sourceURL in files {
-            try Task.checkCancellation()
+        var sidecarFailures = 0
 
-            let destinationURL = uniqueDestinationURL(
-                for: sourceURL,
-                in: plan.destinationDirectory,
-                fileManager: fm
-            )
+        for photoSet in plan.photoSets {
+            let mediaSet = Set(photoSet.mediaFiles.map { $0.standardizedFileURL })
+            let tagNames = plan.tagNames[photoSet.id] ?? []
+            let setMetadata = photoSet.preferredPreviewURL
+                .map { metadataReader.metadata(for: $0) } ?? MetadataSnapshot()
 
-            let fileSize = (try? fm.attributesOfItem(atPath: sourceURL.path)[.size] as? Int64) ?? 0
+            for sourceURL in photoSet.allFiles {
+                try Task.checkCancellation()
 
-            if sourceURL.standardizedFileURL == destinationURL.standardizedFileURL {
+                let destinationURL = uniqueDestinationURL(
+                    for: sourceURL, in: plan.destinationDirectory, fileManager: fm
+                )
+                let fileSize = (try? fm.attributesOfItem(atPath: sourceURL.path)[.size] as? Int64) ?? 0
+                let isSameLocation = sourceURL.standardizedFileURL == destinationURL.standardizedFileURL
+
+                if !isSameLocation {
+                    switch plan.operation {
+                    case .copy: try fm.copyItem(at: sourceURL, to: destinationURL)
+                    case .move: try fm.moveItem(at: sourceURL, to: destinationURL)
+                    }
+                }
+
+                // Best-effort sidecar for media files only.
+                if mediaSet.contains(sourceURL.standardizedFileURL) {
+                    let payload = SidecarPayload(
+                        tagNames: tagNames,
+                        capture: setMetadata
+                    )
+                    let sourceSidecarURL = XMPTaggingService.exportSidecarURL(for: sourceURL)
+                    do {
+                        try await sidecarService.writeExportSidecar(payload, besideDestinationFile: destinationURL, mergingSourceSidecar: sourceSidecarURL)
+                    } catch {
+                        sidecarFailures += 1
+                    }
+                    if plan.operation == .move && !isSameLocation {
+                        removeOrphanSourceSidecar(for: sourceURL, fileManager: fm)
+                    }
+                }
+
                 transferred += 1
                 completedBytes += fileSize
                 let elapsed = Date().timeIntervalSince(startTime)
@@ -93,36 +139,24 @@ actor FileTransferService {
                     totalBytes: totalBytes,
                     bytesPerSecond: bps
                 ))
-                continue
             }
-
-            switch plan.operation {
-            case .copy:
-                try fm.copyItem(at: sourceURL, to: destinationURL)
-            case .move:
-                try fm.moveItem(at: sourceURL, to: destinationURL)
-            }
-
-            transferred += 1
-            completedBytes += fileSize
-            let elapsed = Date().timeIntervalSince(startTime)
-            let bps = elapsed > 0 ? Double(completedBytes) / elapsed : 0
-            
-            await progress?(FileOperationProgress(
-                completed: transferred,
-                total: files.count,
-                currentName: sourceURL.lastPathComponent,
-                completedBytes: completedBytes,
-                totalBytes: totalBytes,
-                bytesPerSecond: bps
-            ))
         }
 
         return TransferSummary(
             operation: plan.operation,
             fileCount: transferred,
-            destinationDirectory: plan.destinationDirectory
+            destinationDirectory: plan.destinationDirectory,
+            sidecarFailures: sidecarFailures
         )
+    }
+
+    /// On move, delete any pre-existing source `.xmp` so the moved file leaves
+    /// no orphaned sidecar behind. The destination sidecar is regenerated.
+    private func removeOrphanSourceSidecar(for sourceURL: URL, fileManager fm: FileManager) {
+        let orphan = XMPTaggingService.exportSidecarURL(for: sourceURL)
+        if fm.fileExists(atPath: orphan.path) {
+            try? fm.removeItem(at: orphan)
+        }
     }
 
     private func uniqueDestinationURL(

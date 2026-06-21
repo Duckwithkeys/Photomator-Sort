@@ -33,8 +33,36 @@ struct PhotoSetCell: View {
                         .frame(maxWidth: .infinity)
                         .aspectRatio(1, contentMode: .fit)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .grayscale(photoSet.pick == -1 ? 0.8 : 0)
+                        .opacity(photoSet.pick == -1 ? 0.6 : 1.0)
 
                     statusBadge
+
+                    if photoSet.pick == 1 || photoSet.pick == -1 {
+                        Image(systemName: photoSet.pick == 1 ? "flag.fill" : "flag.slash.fill")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(photoSet.pick == 1 ? .white : .red)
+                            .padding(6)
+                            .background(.black.opacity(0.5), in: Circle())
+                            .padding(8)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    }
+                    
+                    if let rating = photoSet.rating, rating > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "star.fill")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.yellow)
+                            Text("\(rating)")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .background(.black.opacity(0.5), in: Capsule())
+                        .padding(8)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    }
 
                     if isHovered {
                         Image(systemName: "info.circle.fill")
