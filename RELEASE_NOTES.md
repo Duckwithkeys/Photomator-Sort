@@ -1,3 +1,29 @@
+# DuckSort v1.2.3 (UI Refinements, Performance & Subfolder Navigation)
+
+Welcome to version 1.2.3 of **DuckSort**! This release introduces source subfolder navigation dropdowns in the sidebar, improves sidebar collapse gestures, optimizes `Command + A` performance to eliminate selection lag, introduces scrolling-throttled thumbnail loading, fixes image viewer light/dark mode styling, resolves viewer layout and zoom clipping issues, and fixes the search bar launch auto-focus bug.
+
+## ✨ What's New in v1.2.3
+* **Source Subfolder Navigation**:
+  - Added expandable dropdown lists for subfolders under each source folder in the sidebar.
+  - Clicking a subfolder filters the photo grid view to show only photos from that subfolder.
+* **Improved Sidebar Interaction**:
+  - Allowed collapsing or expanding tag categories by clicking anywhere on the category header row (with dynamic hover-highlights).
+* **Command + A Performance Optimization**:
+  - Refactored selection methods to perform batch array updates, eliminating quadratic redraw loops and preventing main-thread freezes (beach balls) when selecting/deselecting all items.
+* **Throttled Grid Scrolling**:
+  - Added a global scroll state observer to defer and throttle image loading while scrolling rapidly, rendering the grid scrolling butter-smooth.
+* **Large Image Viewer Layout & Styling Fixes**:
+  - Retained a dark canvas background behind the photo viewer in both light and dark macOS modes for maximum image contrast.
+  - Made the viewer top bar and filmstrip adaptively support light and dark system appearances for clean readability.
+  - Fixed image clipping so that zoomed images do not overlap the top bar or filmstrip elements.
+  - Added leading padding to the filmstrip HUD counter capsule and set the filmstrip view background to always dark.
+* **Search Bar Focus Control**:
+  - Bypassed default AppKit/SwiftUI search bar auto-focus on launch using a delayed check, allowing immediate Spacebar culling actions to open the first photo in the grid view.
+* **Typography Size Continuity**:
+  - Adjusted button labels in the Transfer Footer to `.font(.callout)` and grid count text to `.font(.footnote)` to resolve bottom and top header text size continuity issues.
+
+---
+
 # DuckSort v1.2.2 (System Theme Integration & Performance Fixes)
 
 Welcome to version 1.2.2 of **DuckSort**! This release introduces native macOS system appearance integration, fixes critical layout-related main thread hangs (beach balls) when filtering and resizing, improves keyboard focus control, and optimizes startup performance.
