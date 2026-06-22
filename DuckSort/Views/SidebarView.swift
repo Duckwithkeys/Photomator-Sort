@@ -7,6 +7,7 @@ import SwiftUI
 
 struct SidebarView: View {
     @ObservedObject var viewModel: PhotoLibraryViewModel
+    @FocusState private var isSearchFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -64,6 +65,7 @@ struct SidebarView: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                     .foregroundStyle(PhotomatorTheme.textPrimary)
+                    .focused($isSearchFocused)
                 if !viewModel.searchText.isEmpty {
                     Button {
                         viewModel.searchText = ""
@@ -100,7 +102,9 @@ struct SidebarView: View {
         .frame(minWidth: 160, idealWidth: 180, maxWidth: 240)
         .background(PhotomatorTheme.sidebarBackground)
         .onAppear {
-            DispatchQueue.main.async {
+            isSearchFocused = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                isSearchFocused = false
                 NSApp.keyWindow?.makeFirstResponder(nil)
             }
         }
