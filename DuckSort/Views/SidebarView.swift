@@ -175,17 +175,7 @@ struct SourcesSectionView: View {
     var body: some View {
         Section("SOURCES") {
             ForEach(viewModel.sourceDirectories, id: \.self) { url in
-                SourceRow(
-                    url: url,
-                    isFolder: true,
-                    hasError: viewModel.failedSources.contains(url),
-                    onReveal: {
-                        NSWorkspace.shared.activateFileViewerSelecting([url])
-                    },
-                    onRemove: {
-                        viewModel.removeSourceDirectory(url)
-                    }
-                )
+                SourceSectionRow(viewModel: viewModel, url: url)
             }
 
             ForEach(viewModel.looseFiles, id: \.self) { url in
@@ -226,10 +216,14 @@ struct SourcesSectionView: View {
 struct TagsSectionView: View {
     @ObservedObject var viewModel: PhotoLibraryViewModel
     @State private var hoveredTagID: UUID? = nil
+    @State private var isFlagsExpanded = true
+    @State private var isFlagsHovered = false
+    @State private var expandedCategoryIDs: Set<UUID> = []
+    @State private var hoveredCategoryID: UUID? = nil
 
     var body: some View {
         Section("TAGS") {
-            DisclosureGroup {
+            DisclosureGroup(isExpanded: $isFlagsExpanded) {
                 SystemFilterRow(
                     name: "Flagged",
                     systemImage: "flag.fill",
@@ -265,11 +259,28 @@ struct TagsSectionView: View {
                     )
                 }
             } label: {
-                Text("Flags & Ratings")
-                    .font(.subheadline)
-                    .foregroundStyle(PhotomatorTheme.textPrimary)
+                HStack {
+                    Text("Flags & Ratings")
+                        .font(.subheadline)
+                        .foregroundStyle(PhotomatorTheme.textPrimary)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    isFlagsExpanded.toggle()
+                }
+                .onHover { hovering in
+                    withAnimation(.easeInOut(duration: 0.12)) {
+                        isFlagsHovered = hovering
+                    }
+                }
             }
             .tint(PhotomatorTheme.textSecondary)
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isFlagsHovered ? Color.primary.opacity(0.05) : Color.clear)
+                    .padding(.horizontal, 8)
+            )
 
             if viewModel.tagStore.tags.isEmpty {
                 Text("No tags")
@@ -279,7 +290,17 @@ struct TagsSectionView: View {
                 ForEach(viewModel.tagStore.categories) { category in
                     let tagsInCategory = viewModel.tagStore.tags(in: category.id)
                     if !tagsInCategory.isEmpty {
-                        DisclosureGroup {
+                        let isExpandedBinding = Binding<Bool>(
+                            get: { expandedCategoryIDs.contains(category.id) },
+                            set: { isExpanded in
+                                if isExpanded {
+                                    expandedCategoryIDs.insert(category.id)
+                                } else {
+                                    expandedCategoryIDs.remove(category.id)
+                                }
+                            }
+                        )
+                        DisclosureGroup(isExpanded: isExpandedBinding) {
                             ForEach(tagsInCategory) { tag in
                                 Button {
                                     if viewModel.selectedTagFilters.contains(tag.id) {
@@ -323,13 +344,35 @@ struct TagsSectionView: View {
                                 )
                             }
                         } label: {
-                            Text(category.name)
-                                .font(.subheadline)
-                                .foregroundStyle(PhotomatorTheme.textPrimary)
+                            HStack {
+                                Text(category.name)
+                                    .font(.subheadline)
+                                    .foregroundStyle(PhotomatorTheme.textPrimary)
+                                Spacer()
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                isExpandedBinding.wrappedValue.toggle()
+                            }
+                            .onHover { hovering in
+                                withAnimation(.easeInOut(duration: 0.12)) {
+                                    hoveredCategoryID = hovering ? category.id : nil
+                                }
+                            }
                         }
                         .tint(PhotomatorTheme.textSecondary)
+                        .listRowBackground(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(hoveredCategoryID == category.id ? Color.primary.opacity(0.05) : Color.clear)
+                                .padding(.horizontal, 8)
+                        )
                     }
                 }
+            }
+        }
+        .onAppear {
+            if expandedCategoryIDs.isEmpty {
+                expandedCategoryIDs = Set(viewModel.tagStore.categories.map(\.id))
             }
         }
     }
@@ -423,6 +466,105 @@ struct SystemFilterRow: View {
                     .frame(width: 12, height: 12)
                 Text(name)
                     .foregroundStyle(PhotomatorTheme.textPrimary)
+                Spacer()
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.caption)
+                        .foregroundStyle(PhotomatorTheme.textSecondary)
+                }
+            }
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.12)) {
+                isHovered = hovering
+            }
+        }
+        .listRowBackground(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(
+                    isSelected
+                    ? PhotomatorTheme.selectedBlue.opacity(0.15)
+                    : (isHovered ? Color.primary.opacity(0.05) : Color.clear)
+                )
+                .padding(.horizontal, 8)
+        )
+    }
+}
+
+// MARK: - Custom Section / Subfolder Rows
+struct SourceSectionRow: View {
+    @ObservedObject var viewModel: PhotoLibraryViewModel
+    let url: URL
+    @State private var isExpanded = false
+
+    var body: some View {
+        let subfolders = viewModel.cachedSubfolders[url] ?? []
+        if subfolders.count > 1 {
+            DisclosureGroup(isExpanded: $isExpanded) {
+                ForEach(subfolders, id: \.self) { subfolder in
+                    SubfolderRow(viewModel: viewModel, subfolder: subfolder, parentSource: url)
+                }
+            } label: {
+                SourceRow(
+                    url: url,
+                    isFolder: true,
+                    hasError: viewModel.failedSources.contains(url),
+                    onReveal: {
+                        NSWorkspace.shared.activateFileViewerSelecting([url])
+                    },
+                    onRemove: {
+                        viewModel.removeSourceDirectory(url)
+                    }
+                )
+            }
+            .tint(PhotomatorTheme.textSecondary)
+        } else {
+            SourceRow(
+                url: url,
+                isFolder: true,
+                hasError: viewModel.failedSources.contains(url),
+                onReveal: {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                },
+                onRemove: {
+                    viewModel.removeSourceDirectory(url)
+                }
+            )
+        }
+    }
+}
+
+struct SubfolderRow: View {
+    @ObservedObject var viewModel: PhotoLibraryViewModel
+    let subfolder: URL
+    let parentSource: URL
+    @State private var isHovered = false
+
+    var body: some View {
+        let isSelected = viewModel.selectedSubfolderFilter == subfolder
+        let name = viewModel.relativePath(of: subfolder, relativeTo: parentSource)
+        let count = viewModel.cachedSubfolderCounts[subfolder] ?? 0
+
+        Button(action: {
+            if isSelected {
+                viewModel.selectedSubfolderFilter = nil
+            } else {
+                viewModel.selectedSubfolderFilter = subfolder
+            }
+            NSApp.keyWindow?.makeFirstResponder(nil)
+        }) {
+            HStack {
+                Image(systemName: "folder")
+                    .foregroundStyle(isSelected ? PhotomatorTheme.selectedBlue : PhotomatorTheme.textSecondary)
+                    .frame(width: 12, height: 12)
+                Text(name)
+                    .font(.subheadline)
+                    .foregroundStyle(PhotomatorTheme.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                 Spacer()
                 if count > 0 {
                     Text("\(count)")

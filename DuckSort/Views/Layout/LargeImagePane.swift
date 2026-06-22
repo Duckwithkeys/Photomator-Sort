@@ -110,6 +110,7 @@ struct LargeImagePane: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
                 .overlay(alignment: .bottomTrailing) {
                     HStack(spacing: 10) {
                         Button {

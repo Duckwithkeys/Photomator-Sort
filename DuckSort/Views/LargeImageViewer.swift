@@ -13,10 +13,7 @@ struct LargeImageViewer: View {
 
     var body: some View {
         ZStack {
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .ignoresSafeArea()
-            Color.black.opacity(0.4)
+            PhotomatorTheme.background
                 .ignoresSafeArea()
 
             HStack(spacing: 0) {
@@ -32,13 +29,17 @@ struct LargeImageViewer: View {
                         ZStack(alignment: .topLeading) {
                             if let photo = viewModel.currentFocusedPhotoSet {
                                 LargeImagePane(photoSet: photo)
+                                    .background(Color.black)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
                             } else {
                                 VStack {
                                     Spacer()
                                     Text("No photos to display")
-                                        .foregroundStyle(.white.opacity(0.5))
+                                        .foregroundStyle(PhotomatorTheme.textSecondary)
                                     Spacer()
                                 }
+                                .background(Color.black)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
                             }
 
                             if viewModel.isInspectorOpen, let photo = viewModel.currentFocusedPhotoSet {
@@ -47,6 +48,8 @@ struct LargeImageViewer: View {
                                     .transition(.opacity.combined(with: .move(edge: .leading)))
                             }
                         }
+                        .background(Color.black)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
 
                         FilmstripView(viewModel: viewModel)
                             .liquidGlassPanel()
@@ -75,18 +78,18 @@ struct LargeImageViewer: View {
             // Navigation counter
             Text("\(viewModel.focusedPhotoIndex + 1) / \(viewModel.filteredPhotoSets.count)")
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(PhotomatorTheme.textSecondary)
 
             // Photo name
             Text(photo.baseName)
                 .font(.caption.weight(.medium))
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(PhotomatorTheme.textPrimary)
                 .lineLimit(1)
                 
             if photo.pick == 1 || photo.pick == -1 {
                 Image(systemName: photo.pick == 1 ? "flag.fill" : "flag.slash.fill")
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(photo.pick == 1 ? .white : .red)
+                    .foregroundStyle(photo.pick == 1 ? .red : .orange)
             }
             
             if let rating = photo.rating, rating > 0 {
@@ -96,7 +99,7 @@ struct LargeImageViewer: View {
                     Text("\(rating)")
                 }
                 .font(.caption.weight(.bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(PhotomatorTheme.textPrimary)
             }
 
             Spacer()
@@ -113,7 +116,7 @@ struct LargeImageViewer: View {
                             Text(tag.name)
                                 .font(.caption2)
                         }
-                        .foregroundStyle(.white.opacity(0.8))
+                        .foregroundStyle(PhotomatorTheme.textPrimary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(tag.color.opacity(0.2), in: Capsule())
@@ -129,8 +132,9 @@ struct LargeImageViewer: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: photo.isSelected ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(photo.isSelected ? .green : .white.opacity(0.7))
+                        .foregroundStyle(photo.isSelected ? .green : PhotomatorTheme.textSecondary)
                     Text(photo.isSelected ? "Selected" : "Unselected")
+                        .foregroundStyle(PhotomatorTheme.textPrimary)
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
@@ -145,7 +149,7 @@ struct LargeImageViewer: View {
             } label: {
                 Image(systemName: "info.circle")
                     .font(.body)
-                    .foregroundStyle(viewModel.isInspectorOpen ? Color.accentColor : Color.white.opacity(0.7))
+                    .foregroundStyle(viewModel.isInspectorOpen ? Color.accentColor : PhotomatorTheme.textSecondary)
                     .padding(6)
                     .liquidGlassButton(isHovered: false, isApplied: viewModel.isInspectorOpen)
             }
@@ -158,7 +162,7 @@ struct LargeImageViewer: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.body)
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(PhotomatorTheme.textSecondary)
                     .padding(6)
                     .liquidGlassButton(isHovered: false)
             }

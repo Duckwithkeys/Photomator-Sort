@@ -48,6 +48,14 @@ struct ThumbnailView: View {
             do {
                 // 80ms debounce: Skip loading thumbnails if the user scrolls past quickly
                 try await Task.sleep(nanoseconds: 80_000_000)
+                
+                // Scroll-momentum throttling: If scrolling is active, wait until it stops
+                if ScrollStateObserver.shared.isScrolling {
+                    while ScrollStateObserver.shared.isScrolling {
+                        try await Task.sleep(nanoseconds: 100_000_000)
+                    }
+                }
+                
                 await loader.load(url: url, size: size)
             } catch {
                 // Task cancelled, ignore

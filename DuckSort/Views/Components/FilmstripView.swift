@@ -64,10 +64,11 @@ struct FilmstripView: View {
                     .padding(.vertical, 4)
                     .background(Color.black.opacity(0.6), in: Capsule())
                     .padding(.trailing, 12)
+                    .padding(.leading, 16)
             }
         }
         .frame(height: 64)
-        .background(PhotomatorTheme.footerBackground)
+        .background(Color(red: 0.12, green: 0.12, blue: 0.12))
     }
 }
 

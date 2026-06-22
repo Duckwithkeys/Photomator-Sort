@@ -89,7 +89,7 @@ enum PhotomatorTheme {
             if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
                 return NSColor(white: 1.0, alpha: 0.50)
             } else {
-                return NSColor(white: 0.0, alpha: 0.55)
+                return NSColor(white: 0.0, alpha: 0.65)
             }
         })
     }
@@ -99,7 +99,7 @@ enum PhotomatorTheme {
             if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
                 return NSColor(white: 1.0, alpha: 0.30)
             } else {
-                return NSColor(white: 0.0, alpha: 0.35)
+                return NSColor(white: 0.0, alpha: 0.45)
             }
         })
     }

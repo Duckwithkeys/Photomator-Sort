@@ -114,6 +114,14 @@ final class PhotoLibraryViewModel: ObservableObject {
         }
     }
     @Published var nearFocusedIds: Set<UUID> = []
+    
+    @Published var selectedSubfolderFilter: URL? = nil {
+        didSet {
+            updateDerivedState()
+        }
+    }
+    @Published var cachedSubfolders: [URL: [URL]] = [:]
+    @Published var cachedSubfolderCounts: [URL: Int] = [:]
 
     // Memoized sidebar counts
     var cachedAllPhotosCount: Int = 0
@@ -541,15 +549,19 @@ final class PhotoLibraryViewModel: ObservableObject {
     
     func selectVisiblePhotoSets() {
         let visibleIDs = Set(filteredPhotoSets.map(\.id))
-        for index in photoSets.indices where visibleIDs.contains(photoSets[index].id) {
-            photoSets[index].isSelected = true
+        var updated = photoSets
+        for index in updated.indices where visibleIDs.contains(updated[index].id) {
+            updated[index].isSelected = true
         }
+        self.photoSets = updated
     }
     
     func clearSelection() {
-        for index in photoSets.indices {
-            photoSets[index].isSelected = false
+        var updated = photoSets
+        for index in updated.indices {
+            updated[index].isSelected = false
         }
+        self.photoSets = updated
     }
     
     // MARK: - Large image viewer navigation
@@ -973,6 +985,14 @@ final class PhotoLibraryViewModel: ObservableObject {
                 return selectedRatings.contains(ratingVal)
             }
         }
+        if let subfolderFilter = selectedSubfolderFilter {
+            let standardSub = subfolderFilter.standardizedFileURL
+            list = list.filter { photoSet in
+                photoSet.mediaFiles.contains { fileURL in
+                    fileURL.deletingLastPathComponent().standardizedFileURL == standardSub
+                }
+            }
+        }
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if !query.isEmpty {
             list = list.filter { $0.baseName.lowercased().contains(query) }
@@ -1026,6 +1046,55 @@ final class PhotoLibraryViewModel: ObservableObject {
             ratingCounts[rating] = photoSets.filter { ($0.rating ?? 0) == rating }.count
         }
         self.cachedRatingCounts = ratingCounts
+        
+        // Cache subfolders and counts
+        var subfoldersMap: [URL: [URL]] = [:]
+        var subfolderPhotoCounts: [URL: Int] = [:]
+        
+        for sourceURL in sourceDirectories {
+            let standardizedSource = sourceURL.standardizedFileURL.path
+            var subfoldersSet = Set<URL>()
+            
+            for set in photoSets {
+                for file in set.mediaFiles {
+                    let parentDir = file.deletingLastPathComponent().standardizedFileURL
+                    let parentPath = parentDir.path
+                    if parentPath.hasPrefix(standardizedSource) && parentPath != standardizedSource {
+                        subfoldersSet.insert(parentDir)
+                    }
+                }
+            }
+            let sorted = subfoldersSet.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+            subfoldersMap[sourceURL] = sorted
+        }
+        self.cachedSubfolders = subfoldersMap
+        
+        for subfolders in subfoldersMap.values {
+            for subfolder in subfolders {
+                let standardSub = subfolder.standardizedFileURL
+                let count = photoSets.filter { photoSet in
+                    photoSet.mediaFiles.contains { fileURL in
+                        fileURL.deletingLastPathComponent().standardizedFileURL == standardSub
+                    }
+                }.count
+                subfolderPhotoCounts[subfolder] = count
+            }
+        }
+        self.cachedSubfolderCounts = subfolderPhotoCounts
+    }
+    
+    func relativePath(of subfolderURL: URL, relativeTo sourceURL: URL) -> String {
+        let sourcePath = sourceURL.standardizedFileURL.path
+        let subfolderPath = subfolderURL.standardizedFileURL.path
+        if subfolderPath.hasPrefix(sourcePath) {
+            let startIdx = subfolderPath.index(subfolderPath.startIndex, offsetBy: sourcePath.count)
+            var rel = String(subfolderPath[startIdx...])
+            if rel.hasPrefix("/") {
+                rel.removeFirst()
+            }
+            return rel
+        }
+        return subfolderURL.lastPathComponent
     }
     
 } // <---------- THIS BRACE CLOSES THE CLASS.

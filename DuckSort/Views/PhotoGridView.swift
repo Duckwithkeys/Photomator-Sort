@@ -41,7 +41,7 @@ struct PhotoGridView: View {
                                 .foregroundStyle(PhotomatorTheme.textPrimary)
                             
                             Text("\(viewModel.filteredPhotoSets.count) item\(viewModel.filteredPhotoSets.count == 1 ? "" : "s")")
-                                .font(.subheadline)
+                                .font(.footnote)
                                 .foregroundStyle(PhotomatorTheme.textSecondary)
                         }
                         .padding(.horizontal, 20)
