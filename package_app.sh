@@ -5,7 +5,11 @@ set -e
 cd "$(dirname "$0")"
 
 echo "=== Building DuckSort in Release mode ==="
-DEVELOPER_DIR=/Users/oliver/Downloads/Xcode-beta.app/Contents/Developer \
+# Use the beta Xcode if it exists and DEVELOPER_DIR is not already set
+if [ -z "$DEVELOPER_DIR" ] && [ -d "/Users/oliver/Downloads/Xcode-beta.app/Contents/Developer" ]; then
+    export DEVELOPER_DIR="/Users/oliver/Downloads/Xcode-beta.app/Contents/Developer"
+fi
+
 xcodebuild -scheme DuckSort -destination 'platform=macOS' -configuration Release SYMROOT=build OBJROOT=build/intermediates build
 
 echo "=== Creating App Bundle ==="
