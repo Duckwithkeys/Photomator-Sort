@@ -1,3 +1,24 @@
+# DuckSort v1.2.4 (Swift Concurrency & Threading Performance Optimizations)
+
+Welcome to version 1.2.4 of **DuckSort**! This release implements major performance improvements throughout the app's backend and UI systems, focusing on Swift concurrency optimization, O(1) index lookups, concurrent file transfers, and dynamic color memoization to deliver massive performance speedups on large photo libraries.
+
+## ✨ What's New in v1.2.4
+* **Parallelized & Bounded File Transfers**:
+  - Refactored file routing and transfer tasks to run concurrently using a bounded `TaskGroup` on background threads, preventing actor blockage and maximizing NVMe drive throughput.
+  - Parallelized the pre-walk file size calculation phase using a concurrent task group to eliminate start-up delays on large exports.
+* **O(1) Tag Lookup & Debounced Writes**:
+  - Implemented cached lookup index dictionaries for tags in the database to replace slow linear scans with instant lookup operations.
+  - Added a 500ms debounce buffer to throttle Tag Database writes to disk, protecting SSD lifespans and removing UI micro-stutters during rapid hotkey tagging.
+* **Main Actor Optimization & Single-Pass Counting**:
+  - Replaced the broken `break` loop behavior in background metadata loading tasks with a proper, concurrent Swift Concurrency `withTaskGroup` structure.
+  - Flattened the global library metadata count method in the View Model to compute ratings, picks, tag counts, and subfolders concurrently in a single pass instead of nested loops.
+* **Memory & Rendering Optimizations**:
+  - Converted the computed theme colors into static constants, caching the `NSColor` dynamic provider instances once to eliminate allocation overhead during SwiftUI redrawing while retaining full native system appearance updates.
+  - Stored expensive computed properties like preview URLs, display names, and format lists directly on `PhotoSet` at initialization, preventing redundant allocations on every grid cell redraw.
+  - Added a Combine-based 120ms debounce pipeline to search bar filtering to avoid recalculating visible results on every individual keystroke.
+
+---
+
 # DuckSort v1.2.3 (UI Refinements, Performance & Subfolder Navigation)
 
 Welcome to version 1.2.3 of **DuckSort**! This release introduces source subfolder navigation dropdowns in the sidebar, improves sidebar collapse gestures, optimizes `Command + A` performance to eliminate selection lag, introduces scrolling-throttled thumbnail loading, fixes image viewer light/dark mode styling, resolves viewer layout and zoom clipping issues, and fixes the search bar launch auto-focus bug.
