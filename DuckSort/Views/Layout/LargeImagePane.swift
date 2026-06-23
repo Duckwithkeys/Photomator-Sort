@@ -225,7 +225,7 @@ final class LargeImageLoader: ObservableObject {
         }
         
         let ext = url.pathExtension.lowercased()
-        let alwaysCreate = ["heic", "heif", "hif", "raf", "arw", "cr2", "cr3", "nef", "dng", "orf", "rw2", "pef"].contains(ext)
+        let alwaysCreate = FileExtension.rawLikeExtensions.contains(ext)
         Task.detached(priority: .userInitiated) {
             guard let imageSource = CGImageSourceCreateWithURL(standardized as CFURL, nil) else { return }
             let options: [CFString: Any] = [
@@ -259,7 +259,7 @@ final class LargeImageLoader: ObservableObject {
         // 1. Try to load using the fast ImageIO CGImageSource in a detached task
         // We load as CGImage (which is thread-safe and has no Sendable restrictions)
         let ext = url.pathExtension.lowercased()
-        let alwaysCreate = ["heic", "heif", "hif", "raf", "arw", "cr2", "cr3", "nef", "dng", "orf", "rw2", "pef"].contains(ext)
+        let alwaysCreate = FileExtension.rawLikeExtensions.contains(ext)
         let decodeTask = Task.detached(priority: .userInitiated) { () -> CGImage? in
             if Task.isCancelled { return nil }
             guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }

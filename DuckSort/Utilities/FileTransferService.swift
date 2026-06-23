@@ -62,6 +62,14 @@ actor FileTransferService {
     private let sidecarService = XMPTaggingService()
     private let metadataReader = MetadataReader()
 
+    struct TransferJob: Sendable {
+        let photoSet: PhotoSet
+        let sourceURL: URL
+        let tagNames: Set<String>
+        let setMetadata: MetadataSnapshot
+        let mediaSet: Set<URL>
+    }
+
     func execute(
         _ plan: TransferPlan,
         progress: (@Sendable (FileOperationProgress) async -> Void)? = nil
@@ -75,19 +83,26 @@ actor FileTransferService {
         var transferred = 0
         let files = plan.files
 
-        var totalBytes: Int64 = 0
-        for sourceURL in files {
-            do {
-                let attrs = try fm.attributesOfItem(atPath: sourceURL.path)
-                totalBytes += attrs[.size] as? Int64 ?? 0
-            } catch {}
+        let totalBytes = await withTaskGroup(of: Int64.self) { group in
+            for sourceURL in files {
+                group.addTask {
+                    let fm = FileManager.default
+                    let attrs = try? fm.attributesOfItem(atPath: sourceURL.path)
+                    return attrs?[.size] as? Int64 ?? 0
+                }
+            }
+            var sum: Int64 = 0
+            for await size in group {
+                sum += size
+            }
+            return sum
         }
         
         let startTime = Date()
         var completedBytes: Int64 = 0
-
         var sidecarFailures = 0
 
+        var jobs: [TransferJob] = []
         for photoSet in plan.photoSets {
             let mediaSet = Set(photoSet.mediaFiles.map { $0.standardizedFileURL })
             let tagNames = plan.tagNames[photoSet.id] ?? []
@@ -95,40 +110,39 @@ actor FileTransferService {
                 .map { metadataReader.metadata(for: $0) } ?? MetadataSnapshot()
 
             for sourceURL in photoSet.allFiles {
-                try Task.checkCancellation()
+                jobs.append(TransferJob(
+                    photoSet: photoSet,
+                    sourceURL: sourceURL,
+                    tagNames: tagNames,
+                    setMetadata: setMetadata,
+                    mediaSet: mediaSet
+                ))
+            }
+        }
 
-                let destinationURL = uniqueDestinationURL(
-                    for: sourceURL, in: plan.destinationDirectory, fileManager: fm
-                )
-                let fileSize = (try? fm.attributesOfItem(atPath: sourceURL.path)[.size] as? Int64) ?? 0
-                let isSameLocation = sourceURL.standardizedFileURL == destinationURL.standardizedFileURL
+        let limit = min(8, ProcessInfo.processInfo.activeProcessorCount)
+        let localSidecarService = self.sidecarService
 
-                if !isSameLocation {
-                    switch plan.operation {
-                    case .copy: try fm.copyItem(at: sourceURL, to: destinationURL)
-                    case .move: try fm.moveItem(at: sourceURL, to: destinationURL)
-                    }
+        try await withThrowingTaskGroup(of: (Int64, Bool, URL).self) { group in
+            var index = 0
+            var runningTasks = 0
+            while index < jobs.count && runningTasks < limit {
+                let job = jobs[index]
+                index += 1
+                runningTasks += 1
+                group.addTask {
+                    try await self.executeJob(job, plan: plan, sidecarService: localSidecarService)
                 }
+            }
 
-                // Best-effort sidecar for media files only.
-                if mediaSet.contains(sourceURL.standardizedFileURL) {
-                    let payload = SidecarPayload(
-                        tagNames: tagNames,
-                        capture: setMetadata
-                    )
-                    let sourceSidecarURL = XMPTaggingService.exportSidecarURL(for: sourceURL)
-                    do {
-                        try await sidecarService.writeExportSidecar(payload, besideDestinationFile: destinationURL, mergingSourceSidecar: sourceSidecarURL)
-                    } catch {
-                        sidecarFailures += 1
-                    }
-                    if plan.operation == .move && !isSameLocation {
-                        removeOrphanSourceSidecar(for: sourceURL, fileManager: fm)
-                    }
-                }
-
+            while let (fileSize, sidecarFailed, sourceURL) = try await group.next() {
+                runningTasks -= 1
                 transferred += 1
                 completedBytes += fileSize
+                if sidecarFailed {
+                    sidecarFailures += 1
+                }
+
                 let elapsed = Date().timeIntervalSince(startTime)
                 let bps = elapsed > 0 ? Double(completedBytes) / elapsed : 0
                 await progress?(FileOperationProgress(
@@ -139,6 +153,15 @@ actor FileTransferService {
                     totalBytes: totalBytes,
                     bytesPerSecond: bps
                 ))
+
+                if index < jobs.count {
+                    let job = jobs[index]
+                    index += 1
+                    runningTasks += 1
+                    group.addTask {
+                        try await self.executeJob(job, plan: plan, sidecarService: localSidecarService)
+                    }
+                }
             }
         }
 
@@ -150,16 +173,60 @@ actor FileTransferService {
         )
     }
 
+    nonisolated private func executeJob(
+        _ job: TransferJob,
+        plan: TransferPlan,
+        sidecarService: XMPTaggingService
+    ) async throws -> (Int64, Bool, URL) {
+        let fm = FileManager.default
+        let destinationURL = uniqueDestinationURL(
+            for: job.sourceURL, in: plan.destinationDirectory, fileManager: fm
+        )
+        let fileSize = (try? fm.attributesOfItem(atPath: job.sourceURL.path)[.size] as? Int64) ?? 0
+        let isSameLocation = job.sourceURL.standardizedFileURL == destinationURL.standardizedFileURL
+
+        if !isSameLocation {
+            switch plan.operation {
+            case .copy: try fm.copyItem(at: job.sourceURL, to: destinationURL)
+            case .move: try fm.moveItem(at: job.sourceURL, to: destinationURL)
+            }
+        }
+
+        var sidecarFailed = false
+        if job.mediaSet.contains(job.sourceURL.standardizedFileURL) {
+            let payload = SidecarPayload(
+                tagNames: job.tagNames,
+                capture: job.setMetadata
+            )
+            let sourceSidecarURL = XMPTaggingService.exportSidecarURL(for: job.sourceURL)
+            do {
+                try await sidecarService.writeExportSidecar(
+                    payload,
+                    besideDestinationFile: destinationURL,
+                    mergingSourceSidecar: sourceSidecarURL
+                )
+            } catch {
+                sidecarFailed = true
+            }
+
+            if plan.operation == .move && !isSameLocation {
+                removeOrphanSourceSidecar(for: job.sourceURL, fileManager: fm)
+            }
+        }
+
+        return (fileSize, sidecarFailed, job.sourceURL)
+    }
+
     /// On move, delete any pre-existing source `.xmp` so the moved file leaves
     /// no orphaned sidecar behind. The destination sidecar is regenerated.
-    private func removeOrphanSourceSidecar(for sourceURL: URL, fileManager fm: FileManager) {
+    nonisolated private func removeOrphanSourceSidecar(for sourceURL: URL, fileManager fm: FileManager) {
         let orphan = XMPTaggingService.exportSidecarURL(for: sourceURL)
         if fm.fileExists(atPath: orphan.path) {
             try? fm.removeItem(at: orphan)
         }
     }
 
-    private func uniqueDestinationURL(
+    nonisolated private func uniqueDestinationURL(
         for sourceURL: URL,
         in directory: URL,
         fileManager: FileManager

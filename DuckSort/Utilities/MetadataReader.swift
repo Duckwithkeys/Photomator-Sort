@@ -7,6 +7,11 @@ import Foundation
 import ImageIO
 
 struct MetadataReader: Sendable {
+    private static let ratingAttrRegex = try! NSRegularExpression(pattern: #"\b(?:xmp:)?Rating\s*=\s*["']([0-5])["']"#, options: [])
+    private static let ratingTagRegex = try! NSRegularExpression(pattern: #"<(?:xmp:)?Rating\b[^>]*>([0-5])</(?:xmp:)?Rating>"#, options: [])
+    private static let pickAttrRegex = try! NSRegularExpression(pattern: #"\bxmpDM:pick\s*=\s*["'](-?[0-1])["']"#, options: [])
+    private static let pickTagRegex = try! NSRegularExpression(pattern: #"<xmpDM:pick\b[^>]*>(-?[0-1])</xmpDM:pick>"#, options: [])
+
     func metadata(for url: URL) -> MetadataSnapshot {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
@@ -34,37 +39,25 @@ struct MetadataReader: Sendable {
            let xmpString = String(data: xmpData, encoding: .utf8) {
             
             if rating == nil {
-                let attrPattern = #"\b(?:xmp:)?Rating\s*=\s*["']([0-5])["']"#
-                if let regex = try? NSRegularExpression(pattern: attrPattern, options: []),
-                   let match = regex.firstMatch(in: xmpString, options: [], range: NSRange(xmpString.startIndex..., in: xmpString)),
+                if let match = Self.ratingAttrRegex.firstMatch(in: xmpString, options: [], range: NSRange(xmpString.startIndex..., in: xmpString)),
                    let range = Range(match.range(at: 1), in: xmpString),
                    let val = Int(xmpString[range]) {
                     rating = val
-                } else {
-                    let tagPattern = #"<(?:xmp:)?Rating\b[^>]*>([0-5])</(?:xmp:)?Rating>"#
-                    if let regex = try? NSRegularExpression(pattern: tagPattern, options: []),
-                       let match = regex.firstMatch(in: xmpString, options: [], range: NSRange(xmpString.startIndex..., in: xmpString)),
-                       let range = Range(match.range(at: 1), in: xmpString),
-                       let val = Int(xmpString[range]) {
-                        rating = val
-                    }
+                } else if let match = Self.ratingTagRegex.firstMatch(in: xmpString, options: [], range: NSRange(xmpString.startIndex..., in: xmpString)),
+                          let range = Range(match.range(at: 1), in: xmpString),
+                          let val = Int(xmpString[range]) {
+                    rating = val
                 }
             }
             
-            let pickAttrPattern = #"\bxmpDM:pick\s*=\s*["'](-?[0-1])["']"#
-            if let regex = try? NSRegularExpression(pattern: pickAttrPattern, options: []),
-               let match = regex.firstMatch(in: xmpString, options: [], range: NSRange(xmpString.startIndex..., in: xmpString)),
+            if let match = Self.pickAttrRegex.firstMatch(in: xmpString, options: [], range: NSRange(xmpString.startIndex..., in: xmpString)),
                let range = Range(match.range(at: 1), in: xmpString),
                let val = Int(xmpString[range]) {
                 pick = val
-            } else {
-                let pickTagPattern = #"<xmpDM:pick\b[^>]*>(-?[0-1])</xmpDM:pick>"#
-                if let regex = try? NSRegularExpression(pattern: pickTagPattern, options: []),
-                   let match = regex.firstMatch(in: xmpString, options: [], range: NSRange(xmpString.startIndex..., in: xmpString)),
-                   let range = Range(match.range(at: 1), in: xmpString),
-                   let val = Int(xmpString[range]) {
-                    pick = val
-                }
+            } else if let match = Self.pickTagRegex.firstMatch(in: xmpString, options: [], range: NSRange(xmpString.startIndex..., in: xmpString)),
+                      let range = Range(match.range(at: 1), in: xmpString),
+                      let val = Int(xmpString[range]) {
+                pick = val
             }
         }
 

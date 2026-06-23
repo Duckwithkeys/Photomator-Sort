@@ -11,6 +11,12 @@
 
 import Foundation
 
+struct PhotoSetMediaFormats: Hashable, Sendable {
+    let isRaw: Bool
+    let isHeif: Bool
+    let isJpeg: Bool
+}
+
 /// Stable identifier for a photographed subject across multiple file formats.
 struct PhotoSet: Identifiable, Hashable, Sendable {
 
@@ -36,6 +42,12 @@ struct PhotoSet: Identifiable, Hashable, Sendable {
     /// User's flag/pick status (-1 = reject, 0 = unflagged, 1 = flagged)
     var pick: Int? = nil
 
+    // MARK: - Cached stored properties
+    let displayName: String
+    let preferredPreviewURL: URL?
+    let mediaFormats: PhotoSetMediaFormats
+    let formatLabel: String
+
     // MARK: - Computed properties
 
     /// Whether Photomator has produced an edit sidecar for this photo.
@@ -48,21 +60,8 @@ struct PhotoSet: Identifiable, Hashable, Sendable {
         return result
     }
 
-    /// Filename suitable for display in the UI grid.
-    var displayName: String {
-        baseName.replacingOccurrences(of: "_", with: " ")
-                 .replacingOccurrences(of: "-", with: " ")
-    }
-
     /// The count of media files (RAW/HEIF/JPEG) in this set.
     var mediaCount: Int { mediaFiles.count }
-
-    /// Prefer already-rendered formats for faster thumbnails before falling back to RAW.
-    var preferredPreviewURL: URL? {
-        mediaFiles.sorted { lhs, rhs in
-            Self.previewRank(for: lhs) < Self.previewRank(for: rhs)
-        }.first
-    }
 
     // MARK: - Init
 
@@ -74,8 +73,41 @@ struct PhotoSet: Identifiable, Hashable, Sendable {
     ) {
         self.id = id
         self.baseName = baseName
-        self.mediaFiles = mediaFiles.sorted { $0.path < $1.path }
+        let sortedFiles = mediaFiles.sorted { $0.path < $1.path }
+        self.mediaFiles = sortedFiles
         self.editPath = editPath
+
+        self.displayName = baseName.replacingOccurrences(of: "_", with: " ")
+                                   .replacingOccurrences(of: "-", with: " ")
+
+        self.preferredPreviewURL = sortedFiles.sorted { lhs, rhs in
+            Self.previewRank(for: lhs) < Self.previewRank(for: rhs)
+        }.first
+
+        let extensions = Set(sortedFiles.map { $0.pathExtension.lowercased() })
+        var hasRaw = false
+        var hasJpeg = false
+        var hasHeif = false
+        for ext in extensions {
+            if FileExtension.rawLikeExtensions.contains(ext) {
+                hasRaw = true
+            } else if ["jpg", "jpeg"].contains(ext) {
+                hasJpeg = true
+            } else if ["heic", "heif", "hif"].contains(ext) {
+                hasHeif = true
+            }
+        }
+        self.mediaFormats = PhotoSetMediaFormats(isRaw: hasRaw, isHeif: hasHeif, isJpeg: hasJpeg)
+
+        var parts: [String] = []
+        if hasRaw { parts.append("RAW") }
+        if hasHeif { parts.append("HEIF") }
+        if hasJpeg { parts.append("JPEG") }
+        if parts.isEmpty {
+            self.formatLabel = "MEDIA"
+        } else {
+            self.formatLabel = parts.joined(separator: " + ")
+        }
     }
 
     // MARK: - Hashable / Equatable

@@ -13,34 +13,7 @@ struct PhotoSetCell: View {
     let toggleSelection: () -> Void
     @State private var isHovered = false
 
-    private var mediaFormats: (isRaw: Bool, isHeif: Bool, isJpeg: Bool) {
-        let extensions = Set(photoSet.mediaFiles.map { $0.pathExtension.lowercased() })
-        var isRaw = false
-        var isJpeg = false
-        var isHeif = false
-        for ext in extensions {
-            if ["raf", "arw", "cr2", "cr3", "nef", "dng", "orf", "rw2", "pef"].contains(ext) {
-                isRaw = true
-            } else if ["jpg", "jpeg"].contains(ext) {
-                isJpeg = true
-            } else if ["heic", "heif", "hif"].contains(ext) {
-                isHeif = true
-            }
-        }
-        return (isRaw, isHeif, isJpeg)
-    }
 
-    private var formatLabel: String {
-        let formats = mediaFormats
-        var parts: [String] = []
-        if formats.isRaw { parts.append("RAW") }
-        if formats.isHeif { parts.append("HEIF") }
-        if formats.isJpeg { parts.append("JPEG") }
-        if parts.isEmpty {
-            return "MEDIA"
-        }
-        return parts.joined(separator: " + ")
-    }
 
     var body: some View {
         Button(action: toggleSelection) {
@@ -67,14 +40,14 @@ struct PhotoSetCell: View {
                     .overlay(alignment: .topLeading) {
                         // Format Badge & Wand/Warning Icon on Top-Left (Wand = edited in orange; Exclamation = needs edit in red)
                         HStack(spacing: 4) {
-                            Text(formatLabel)
+                            Text(photoSet.formatLabel)
                                 .font(.system(size: 10, weight: .bold))
                                 .foregroundStyle(.black)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 3)
                                 .background(Color.white, in: RoundedRectangle(cornerRadius: 4))
                             
-                            let formats = mediaFormats
+                            let formats = photoSet.mediaFormats
                             let isComplete = formats.isRaw && formats.isHeif && photoSet.hasEdit
                             let showWand = isJpegOnlyMode ? photoSet.hasEdit : isComplete
                             let showWarning = !isJpegOnlyMode && !isComplete

@@ -16,6 +16,15 @@ actor RoutedTransferService {
     private let metadataReader = MetadataReader()
     private let sidecarService = XMPTaggingService()
 
+    struct RoutedJob: Sendable {
+        let sourceURL: URL
+        let destinationFolder: URL
+        let photoSet: PhotoSet
+        let tagNames: Set<String>
+        let metadata: MetadataSnapshot
+        let mediaSet: Set<URL>
+    }
+
     func execute(
         _ plan: RoutedPlan,
         categoryNameProvider: @Sendable (UUID) -> String?,
@@ -36,35 +45,16 @@ actor RoutedTransferService {
         }
 
         var totalFiles = 0
-        var totalBytes: Int64 = 0
-        var processed = 0
         var foldersCreated = 0
         var sidecarFailures = 0
 
-        switch plan.operation {
-        case .copyOriginals, .moveOriginals:
-            for routed in plan.photos {
-                let folders = ExportPathRouter.destinationFolders(
-                    base: plan.baseDestination,
-                    rule: plan.rule,
-                    metadata: routed.metadata,
-                    assignedTags: routed.tags,
-                    categoryNameProvider: categoryNameProvider
-                )
-                let multiplier = folders.count
-                for fileURL in routed.photoSet.allFiles {
-                    totalFiles += multiplier
-                    let size = (try? fm.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0
-                    totalBytes += size * Int64(multiplier)
-                }
-            }
+        // 1. Pre-walk & compute multipliers
+        struct FileWalkItem: Sendable {
+            let url: URL
+            let multiplier: Int
         }
-
-        let startTime = Date()
-        var completedBytes: Int64 = 0
-        var photoSequence = 0
+        var walkItems: [FileWalkItem] = []
         for routed in plan.photos {
-            try Task.checkCancellation()
             let folders = ExportPathRouter.destinationFolders(
                 base: plan.baseDestination,
                 rule: plan.rule,
@@ -72,126 +62,130 @@ actor RoutedTransferService {
                 assignedTags: routed.tags,
                 categoryNameProvider: categoryNameProvider
             )
-            
+            let multiplier = folders.count
+            for fileURL in routed.photoSet.allFiles {
+                totalFiles += multiplier
+                walkItems.append(FileWalkItem(url: fileURL, multiplier: multiplier))
+            }
+        }
+
+        // 2. Parallel size computation
+        let totalBytes = await withTaskGroup(of: Int64.self) { group in
+            for item in walkItems {
+                group.addTask {
+                    let fm = FileManager.default
+                    let size = (try? fm.attributesOfItem(atPath: item.url.path)[.size] as? Int64) ?? 0
+                    return size * Int64(item.multiplier)
+                }
+            }
+            var sum: Int64 = 0
+            for await size in group {
+                sum += size
+            }
+            return sum
+        }
+
+        // 3. Pre-create directories sequentially to avoid race conditions
+        for routed in plan.photos {
+            let folders = ExportPathRouter.destinationFolders(
+                base: plan.baseDestination,
+                rule: plan.rule,
+                metadata: routed.metadata,
+                assignedTags: routed.tags,
+                categoryNameProvider: categoryNameProvider
+            )
             for folder in folders {
                 let existed = fm.fileExists(atPath: folder.path)
                 try fm.createDirectory(at: folder, withIntermediateDirectories: true)
                 if !existed { foldersCreated += 1 }
             }
+        }
 
-            photoSequence += 1
+        // 4. Build job list
+        var jobs: [RoutedJob] = []
+        for routed in plan.photos {
+            let folders = ExportPathRouter.destinationFolders(
+                base: plan.baseDestination,
+                rule: plan.rule,
+                metadata: routed.metadata,
+                assignedTags: routed.tags,
+                categoryNameProvider: categoryNameProvider
+            )
+            let mediaSet = Set(routed.photoSet.mediaFiles.map { $0.standardizedFileURL })
+            let tagNames = Set(routed.tags.map(\.name))
 
-            switch plan.operation {
-            case .copyOriginals:
-                for folder in folders {
-                    for sourceURL in routed.photoSet.allFiles {
-                        try Task.checkCancellation()
-                        let dest = uniqueDestinationURL(
-                            for: sourceURL, in: folder, fileManager: fm
-                        )
-                        let fileSize = (try? fm.attributesOfItem(atPath: sourceURL.path)[.size] as? Int64) ?? 0
-                        
-                        if sourceURL.standardizedFileURL == dest.standardizedFileURL {
-                            processed += 1
-                            completedBytes += fileSize
-                            let elapsed = Date().timeIntervalSince(startTime)
-                            let bps = elapsed > 0 ? Double(completedBytes) / elapsed : 0
-                            await progress?(FileOperationProgress(
-                                completed: processed,
-                                total: totalFiles,
-                                currentName: dest.lastPathComponent,
-                                completedBytes: completedBytes,
-                                totalBytes: totalBytes,
-                                bytesPerSecond: bps
-                            ))
-                            continue
-                        }
-                        try fm.copyItem(at: sourceURL, to: dest)
-                        if routed.photoSet.mediaFiles.map(\.standardizedFileURL)
-                            .contains(sourceURL.standardizedFileURL) {
-                            let sourceSidecar = XMPTaggingService.exportSidecarURL(for: sourceURL)
-                            await writeSidecar(
-                                tagNames: Set(routed.tags.map(\.name)),
-                                capture: routed.metadata,
-                                besideDestination: dest,
-                                mergingSourceSidecar: sourceSidecar,
-                                failures: &sidecarFailures
-                            )
-                        }
-                        processed += 1
-                        completedBytes += fileSize
-                        let elapsed = Date().timeIntervalSince(startTime)
-                        let bps = elapsed > 0 ? Double(completedBytes) / elapsed : 0
-                        await progress?(FileOperationProgress(
-                            completed: processed,
-                            total: totalFiles,
-                            currentName: dest.lastPathComponent,
-                            completedBytes: completedBytes,
-                            totalBytes: totalBytes,
-                            bytesPerSecond: bps
-                        ))
-                    }
+            for folder in folders {
+                for sourceURL in routed.photoSet.allFiles {
+                    jobs.append(RoutedJob(
+                        sourceURL: sourceURL,
+                        destinationFolder: folder,
+                        photoSet: routed.photoSet,
+                        tagNames: tagNames,
+                        metadata: routed.metadata,
+                        mediaSet: mediaSet
+                    ))
                 }
-            case .moveOriginals:
-                // For moveOriginals with potential multiple destination folders:
-                // Copy to each folder first, and then delete the original source files.
-                for folder in folders {
-                    for sourceURL in routed.photoSet.allFiles {
-                        try Task.checkCancellation()
-                        let dest = uniqueDestinationURL(
-                            for: sourceURL, in: folder, fileManager: fm
-                        )
-                        let fileSize = (try? fm.attributesOfItem(atPath: sourceURL.path)[.size] as? Int64) ?? 0
-                        
-                        if sourceURL.standardizedFileURL == dest.standardizedFileURL {
-                            processed += 1
-                            completedBytes += fileSize
-                            let elapsed = Date().timeIntervalSince(startTime)
-                            let bps = elapsed > 0 ? Double(completedBytes) / elapsed : 0
-                            await progress?(FileOperationProgress(
-                                completed: processed,
-                                total: totalFiles,
-                                currentName: dest.lastPathComponent,
-                                completedBytes: completedBytes,
-                                totalBytes: totalBytes,
-                                bytesPerSecond: bps
-                            ))
-                            continue
-                        }
-                        try fm.copyItem(at: sourceURL, to: dest)
-                        if routed.photoSet.mediaFiles.map(\.standardizedFileURL)
-                            .contains(sourceURL.standardizedFileURL) {
-                            let sourceSidecar = XMPTaggingService.exportSidecarURL(for: sourceURL)
-                            await writeSidecar(
-                                tagNames: Set(routed.tags.map(\.name)),
-                                capture: routed.metadata,
-                                besideDestination: dest,
-                                mergingSourceSidecar: sourceSidecar,
-                                failures: &sidecarFailures
-                            )
-                        }
-                        processed += 1
-                        completedBytes += fileSize
-                        let elapsed = Date().timeIntervalSince(startTime)
-                        let bps = elapsed > 0 ? Double(completedBytes) / elapsed : 0
-                        await progress?(FileOperationProgress(
-                            completed: processed,
-                            total: totalFiles,
-                            currentName: dest.lastPathComponent,
-                            completedBytes: completedBytes,
-                            totalBytes: totalBytes,
-                            bytesPerSecond: bps
-                        ))
-                    }
+            }
+        }
+
+        // 5. Execute jobs in bounded concurrent task group
+        let limit = min(8, ProcessInfo.processInfo.activeProcessorCount)
+        let localSidecarService = self.sidecarService
+        let startTime = Date()
+        var completedBytes: Int64 = 0
+        var processed = 0
+
+        try await withThrowingTaskGroup(of: (Int64, Bool, URL, URL).self) { group in
+            var index = 0
+            var runningTasks = 0
+            while index < jobs.count && runningTasks < limit {
+                let job = jobs[index]
+                index += 1
+                runningTasks += 1
+                group.addTask {
+                    try await self.executeJob(job, operation: plan.operation, sidecarService: localSidecarService)
+                }
+            }
+
+            while let (fileSize, sidecarFailed, _, dest) = try await group.next() {
+                runningTasks -= 1
+                processed += 1
+                completedBytes += fileSize
+                if sidecarFailed {
+                    sidecarFailures += 1
                 }
 
-                // Now clean up original source files and sidecars since they have been copied to all destinations
+                let elapsed = Date().timeIntervalSince(startTime)
+                let bps = elapsed > 0 ? Double(completedBytes) / elapsed : 0
+                await progress?(FileOperationProgress(
+                    completed: processed,
+                    total: totalFiles,
+                    currentName: dest.lastPathComponent,
+                    completedBytes: completedBytes,
+                    totalBytes: totalBytes,
+                    bytesPerSecond: bps
+                ))
+
+                if index < jobs.count {
+                    let job = jobs[index]
+                    index += 1
+                    runningTasks += 1
+                    group.addTask {
+                        try await self.executeJob(job, operation: plan.operation, sidecarService: localSidecarService)
+                    }
+                }
+            }
+        }
+
+        // 6. Clean up original source files for moveOriginals
+        if plan.operation == .moveOriginals {
+            for routed in plan.photos {
+                let mediaSet = Set(routed.photoSet.mediaFiles.map { $0.standardizedFileURL })
                 for sourceURL in routed.photoSet.allFiles {
                     if fm.fileExists(atPath: sourceURL.path) {
-                        try fm.removeItem(at: sourceURL)
+                        try? fm.removeItem(at: sourceURL)
                     }
-                    if routed.photoSet.mediaFiles.map(\.standardizedFileURL)
-                        .contains(sourceURL.standardizedFileURL) {
+                    if mediaSet.contains(sourceURL.standardizedFileURL) {
                         let orphan = XMPTaggingService.exportSidecarURL(for: sourceURL)
                         if fm.fileExists(atPath: orphan.path) {
                             try? fm.removeItem(at: orphan)
@@ -212,23 +206,38 @@ actor RoutedTransferService {
 
     // MARK: - Sidecar writing
 
-    private func writeSidecar(
-        tagNames: Set<String>,
-        capture: MetadataSnapshot,
-        besideDestination dest: URL,
-        mergingSourceSidecar sourceSidecarURL: URL? = nil,
-        failures: inout Int
-    ) async {
-        let payload = SidecarPayload(tagNames: tagNames, capture: capture)
-        do {
-            try await sidecarService.writeExportSidecar(
-                payload,
-                besideDestinationFile: dest,
-                mergingSourceSidecar: sourceSidecarURL
-            )
-        } catch {
-            failures += 1
+    nonisolated private func executeJob(
+        _ job: RoutedJob,
+        operation: RoutedOperation,
+        sidecarService: XMPTaggingService
+    ) async throws -> (Int64, Bool, URL, URL) {
+        let fm = FileManager.default
+        let dest = uniqueDestinationURL(
+            for: job.sourceURL, in: job.destinationFolder, fileManager: fm
+        )
+        let fileSize = (try? fm.attributesOfItem(atPath: job.sourceURL.path)[.size] as? Int64) ?? 0
+        let isSameLocation = job.sourceURL.standardizedFileURL == dest.standardizedFileURL
+
+        if !isSameLocation {
+            try fm.copyItem(at: job.sourceURL, to: dest)
         }
+
+        var sidecarFailed = false
+        if job.mediaSet.contains(job.sourceURL.standardizedFileURL) {
+            let sourceSidecar = XMPTaggingService.exportSidecarURL(for: job.sourceURL)
+            let payload = SidecarPayload(tagNames: job.tagNames, capture: job.metadata)
+            do {
+                try await sidecarService.writeExportSidecar(
+                    payload,
+                    besideDestinationFile: dest,
+                    mergingSourceSidecar: sourceSidecar
+                )
+            } catch {
+                sidecarFailed = true
+            }
+        }
+
+        return (fileSize, sidecarFailed, job.sourceURL, dest)
     }
 
     // MARK: - JPEG writing
@@ -289,7 +298,7 @@ actor RoutedTransferService {
 
     // MARK: - Unique destination helper
 
-    private func uniqueDestinationURL(
+    nonisolated private func uniqueDestinationURL(
         for sourceURL: URL,
         in directory: URL,
         fileManager: FileManager
@@ -313,7 +322,7 @@ actor RoutedTransferService {
         return original
     }
 
-    private func uniqueDestinationURL(
+    nonisolated private func uniqueDestinationURL(
         forFileName fileName: String,
         in directory: URL,
         fileManager: FileManager

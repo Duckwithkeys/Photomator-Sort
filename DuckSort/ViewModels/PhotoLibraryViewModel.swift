@@ -108,11 +108,7 @@ final class PhotoLibraryViewModel: ObservableObject {
     @Published var currentTagCategoryID: UUID? = nil
 
     /// Memoized counts & UI state
-    @Published var searchText = "" {
-        didSet {
-            updateDerivedState()
-        }
-    }
+    @Published var searchText = ""
     @Published var nearFocusedIds: Set<UUID> = []
     
     @Published var selectedSubfolderFilter: URL? = nil {
@@ -164,6 +160,15 @@ final class PhotoLibraryViewModel: ObservableObject {
                 self?.updateGlobalCounts()
                 self?.updateDerivedState()
                 self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+        
+        $searchText
+            .dropFirst()
+            .removeDuplicates()
+            .debounce(for: .milliseconds(120), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.updateDerivedState()
             }
             .store(in: &cancellables)
         
@@ -421,71 +426,41 @@ final class PhotoLibraryViewModel: ObservableObject {
         metadataTask?.cancel()
         let sets = photoSets
         metadataTask = Task { @MainActor [metadataReader] in
-            var cache: [UUID: MetadataSnapshot] = [:]
-            
-            await withTaskGroup(of: (UUID, MetadataSnapshot)?.self) { group in
-                var index = 0
-                var activeTasks = 0
-                
-                // 1. Fill the buffer with up to 8 concurrent tasks
-                while index < sets.count && activeTasks < 8 {
-                    let set = sets[index]
-                    index += 1
-                    
-                    guard let url = set.preferredPreviewURL else { continue }
-                    
-                    activeTasks += 1
+            let urls: [(UUID, URL)] = sets.compactMap { set in
+                guard let url = set.preferredPreviewURL else { return nil }
+                return (set.id, url)
+            }
+            let snapshots: [(UUID, MetadataSnapshot)] = await withTaskGroup(of: (UUID, MetadataSnapshot).self) { group in
+                for (id, url) in urls {
                     group.addTask {
-                        if Task.isCancelled { return nil }
-                        let snapshot = metadataReader.metadata(for: url)
-                        return (set.id, snapshot)
+                        (id, metadataReader.metadata(for: url))
                     }
                 }
-                
-                // 2. Process results and maintain up to 8 concurrent tasks
-                while activeTasks > 0 {
-                    guard let result = await group.next() else { break }
-                    activeTasks -= 1
-                    
-                    if Task.isCancelled { break }
-                    
-                    if let (id, snapshot) = result {
-                        cache[id] = snapshot
-                    }
-                    
-                    // 3. Add new tasks to replace the completed ones
-                    while index < sets.count && activeTasks < 8 {
-                        let set = sets[index]
-                        index += 1
-                        
-                        guard let url = set.preferredPreviewURL else { continue }
-                        
-                        activeTasks += 1
-                        group.addTask {
-                            if Task.isCancelled { return nil }
-                            let snapshot = metadataReader.metadata(for: url)
-                            return (set.id, snapshot)
-                        }
-                        break
-                    }
-                }
+                var out: [(UUID, MetadataSnapshot)] = []
+                out.reserveCapacity(urls.count)
+                for await result in group { out.append(result) }
+                return out
             }
             
-            if !Task.isCancelled {
-                self.photoMetadata = cache
-                var updatedSets = self.photoSets
-                for (id, snapshot) in cache {
-                    if let idx = updatedSets.firstIndex(where: { $0.id == id }) {
-                        if updatedSets[idx].rating == nil {
-                            updatedSets[idx].rating = snapshot.rating
-                        }
-                        if updatedSets[idx].pick == nil {
-                            updatedSets[idx].pick = snapshot.pick
-                        }
+            if Task.isCancelled { return }
+            
+            var cache: [UUID: MetadataSnapshot] = [:]
+            cache.reserveCapacity(snapshots.count)
+            var updatedSets = self.photoSets
+            
+            for (id, snap) in snapshots {
+                cache[id] = snap
+                if let idx = updatedSets.firstIndex(where: { $0.id == id }) {
+                    if updatedSets[idx].rating == nil {
+                        updatedSets[idx].rating = snap.rating
+                    }
+                    if updatedSets[idx].pick == nil {
+                        updatedSets[idx].pick = snap.pick
                     }
                 }
-                self.photoSets = updatedSets
             }
+            self.photoMetadata = cache
+            self.photoSets = updatedSets
         }
     }
     
@@ -837,68 +812,52 @@ final class PhotoLibraryViewModel: ObservableObject {
         tagTask?.cancel()
         let sets = photoSets
         let allTags = tagStore.tags
+        
         tagTask = Task { @MainActor [xmpTagging, tagStore] in
-            var batchTags: [UUID: Set<UUID>] = [:]
-            var updatedSets = sets
+            let nameToID: [String: UUID] = Dictionary(uniqueKeysWithValues: allTags.map { ($0.name, $0.id) })
             
-            await withTaskGroup(of: (UUID, (tags: Set<String>, rating: Int?, pick: Int?))?.self) { group in
-                var index = 0
-                var activeTasks = 0
-                
-                while index < sets.count && activeTasks < 16 {
-                    let photo = sets[index]
+            let results: [(UUID, (tags: Set<String>, rating: Int?, pick: Int?))] = await withTaskGroup(of: (UUID, (tags: Set<String>, rating: Int?, pick: Int?)).self) { group in
+                for photo in sets {
                     group.addTask {
-                        if Task.isCancelled { return nil }
                         let data = await xmpTagging.readSidecarData(from: photo)
                         return (photo.id, data)
                     }
-                    index += 1
-                    activeTasks += 1
+                }
+                var out: [(UUID, (tags: Set<String>, rating: Int?, pick: Int?))] = []
+                out.reserveCapacity(sets.count)
+                for await result in group { out.append(result) }
+                return out
+            }
+            
+            if Task.isCancelled { return }
+            
+            var batchTags: [UUID: Set<UUID>] = [:]
+            var updatedSets = self.photoSets
+            
+            for (id, data) in results {
+                if !data.tags.isEmpty {
+                    let tagIDs = Set(data.tags.compactMap { nameToID[$0] })
+                    if !tagIDs.isEmpty {
+                        batchTags[id] = tagIDs
+                    }
                 }
                 
-                while activeTasks > 0 {
-                    guard let result = await group.next() else { break }
-                    activeTasks -= 1
-                    
-                    if Task.isCancelled { break }
-                    
-                    if let (id, data) = result {
-                        if !data.tags.isEmpty {
-                            let tagIDs = Set(allTags
-                                .filter { data.tags.contains($0.name) }
-                                .map(\.id))
-                            if !tagIDs.isEmpty {
-                                batchTags[id] = tagIDs
-                            }
+                if data.rating != nil || data.pick != nil {
+                    if let idx = updatedSets.firstIndex(where: { $0.id == id }) {
+                        if let r = data.rating, updatedSets[idx].rating == nil {
+                            updatedSets[idx].rating = r
                         }
-                        
-                        if data.rating != nil || data.pick != nil {
-                            if let idx = updatedSets.firstIndex(where: { $0.id == id }) {
-                                if let r = data.rating { updatedSets[idx].rating = r }
-                                if let p = data.pick { updatedSets[idx].pick = p }
-                            }
+                        if let p = data.pick, updatedSets[idx].pick == nil {
+                            updatedSets[idx].pick = p
                         }
-                    }
-                    
-                    while index < sets.count && activeTasks < 16 {
-                        let photo = sets[index]
-                        activeTasks += 1
-                        group.addTask {
-                            if Task.isCancelled { return nil }
-                            let data = await xmpTagging.readSidecarData(from: photo)
-                            return (photo.id, data)
-                        }
-                        index += 1
                     }
                 }
             }
             
-            if !Task.isCancelled {
-                if !batchTags.isEmpty {
-                    tagStore.setTagsBatch(batchTags)
-                }
-                self.photoSets = updatedSets
+            if !batchTags.isEmpty {
+                tagStore.setTagsBatch(batchTags)
             }
+            self.photoSets = updatedSets
         }
     }
     
@@ -1025,59 +984,82 @@ final class PhotoLibraryViewModel: ObservableObject {
     }
 
     func updateGlobalCounts() {
-        self.cachedAllPhotosCount = photoSets.count
-        self.cachedEditedCount = photoSets.filter(\.hasEdit).count
-        self.cachedUneditedCount = photoSets.count - cachedEditedCount
+        let totalPhotos = photoSets.count
+        self.cachedAllPhotosCount = totalPhotos
         
-        var tagCounts: [UUID: Int] = [:]
-        for tag in tagStore.tags {
-            tagCounts[tag.id] = photoSets.filter { tagStore.assignedTagIDs(for: $0.id).contains(tag.id) }.count
+        var editedCount = 0
+        var pick1Count = 0
+        var pickMinus1Count = 0
+        var pick0Count = 0
+        var ratingCounts = [Int: Int]()
+        for r in 0...5 { ratingCounts[r] = 0 }
+        
+        var tagHistogram = [UUID: Int]()
+        for tag in tagStore.tags { tagHistogram[tag.id] = 0 }
+        
+        var photoSetsBySubfolder = [URL: Set<UUID>]()
+        
+        for photoSet in photoSets {
+            if photoSet.hasEdit {
+                editedCount += 1
+            }
+            
+            let pick = photoSet.pick ?? 0
+            if pick == 1 {
+                pick1Count += 1
+            } else if pick == -1 {
+                pickMinus1Count += 1
+            } else {
+                pick0Count += 1
+            }
+            
+            let rating = photoSet.rating ?? 0
+            if rating >= 0 && rating <= 5 {
+                ratingCounts[rating, default: 0] += 1
+            }
+            
+            let assignedIDs = tagStore.assignedTagIDs(for: photoSet.id)
+            for tagID in assignedIDs {
+                tagHistogram[tagID, default: 0] += 1
+            }
+            
+            for file in photoSet.mediaFiles {
+                let parentDir = file.deletingLastPathComponent().standardizedFileURL
+                photoSetsBySubfolder[parentDir, default: []].insert(photoSet.id)
+            }
         }
-        self.cachedTagCounts = tagCounts
         
-        var flagCounts: [Int: Int] = [:]
-        flagCounts[1] = photoSets.filter { $0.pick == 1 }.count
-        flagCounts[-1] = photoSets.filter { $0.pick == -1 }.count
-        flagCounts[0] = photoSets.filter { ($0.pick ?? 0) == 0 }.count
-        self.cachedFlagCounts = flagCounts
+        self.cachedEditedCount = editedCount
+        self.cachedUneditedCount = totalPhotos - editedCount
         
-        var ratingCounts: [Int: Int] = [:]
-        for rating in 0...5 {
-            ratingCounts[rating] = photoSets.filter { ($0.rating ?? 0) == rating }.count
-        }
+        self.cachedTagCounts = tagHistogram
+        self.cachedFlagCounts = [1: pick1Count, -1: pickMinus1Count, 0: pick0Count]
         self.cachedRatingCounts = ratingCounts
         
-        // Cache subfolders and counts
         var subfoldersMap: [URL: [URL]] = [:]
         var subfolderPhotoCounts: [URL: Int] = [:]
+        
+        let allSubfolders = Array(photoSetsBySubfolder.keys)
         
         for sourceURL in sourceDirectories {
             let standardizedSource = sourceURL.standardizedFileURL.path
             var subfoldersSet = Set<URL>()
             
-            for set in photoSets {
-                for file in set.mediaFiles {
-                    let parentDir = file.deletingLastPathComponent().standardizedFileURL
-                    let parentPath = parentDir.path
-                    if parentPath.hasPrefix(standardizedSource) && parentPath != standardizedSource {
-                        subfoldersSet.insert(parentDir)
-                    }
+            for parentDir in allSubfolders {
+                let parentPath = parentDir.path
+                if parentPath.hasPrefix(standardizedSource) && parentPath != standardizedSource {
+                    subfoldersSet.insert(parentDir)
                 }
             }
-            let sorted = subfoldersSet.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+            
+            let sorted = subfoldersSet.sorted { $0.path < $1.path }
             subfoldersMap[sourceURL] = sorted
         }
         self.cachedSubfolders = subfoldersMap
         
         for subfolders in subfoldersMap.values {
             for subfolder in subfolders {
-                let standardSub = subfolder.standardizedFileURL
-                let count = photoSets.filter { photoSet in
-                    photoSet.mediaFiles.contains { fileURL in
-                        fileURL.deletingLastPathComponent().standardizedFileURL == standardSub
-                    }
-                }.count
-                subfolderPhotoCounts[subfolder] = count
+                subfolderPhotoCounts[subfolder] = photoSetsBySubfolder[subfolder]?.count ?? 0
             }
         }
         self.cachedSubfolderCounts = subfolderPhotoCounts

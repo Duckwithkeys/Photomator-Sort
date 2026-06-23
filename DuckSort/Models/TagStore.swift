@@ -16,12 +16,32 @@ final class TagStore: ObservableObject {
     @Published private(set) var tags: [CustomTag] = []
     @Published private(set) var assignments: [UUID: PhotoTagAssignment] = [:]
 
+
     private let storeURL: URL
+
+    // Cache dictionaries for fast lookups
+    private var tagsByCategoryID: [UUID: [CustomTag]] = [:]
+    private var tagsByID: [UUID: CustomTag] = [:]
+    private var tagsByName: [String: CustomTag] = [:]
+    private var categoryNamesByID: [UUID: String] = [:]
+    private var categoriesByID: [UUID: TagCategory] = [:]
+
+    private var saveTask: Task<Void, Never>? = nil
 
     private struct PersistedShape: Codable {
         var categories: [TagCategory]
         var tags: [CustomTag]
         var assignments: [PhotoTagAssignment]
+    }
+
+    private func updateIndexes() {
+        tagsByCategoryID = Dictionary(grouping: tags, by: { $0.categoryID })
+        tagsByID = Dictionary(uniqueKeysWithValues: tags.map { ($0.id, $0) })
+        tagsByName = tags.reduce(into: [String: CustomTag]()) { dict, tag in
+            dict[tag.name] = tag
+        }
+        categoryNamesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0.name) })
+        categoriesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
     }
 
     init() {
@@ -46,24 +66,24 @@ final class TagStore: ObservableObject {
     // MARK: - Lookup helpers
 
     func category(id: UUID) -> TagCategory? {
-        categories.first(where: { $0.id == id })
+        categoriesByID[id]
     }
 
     func categoryName(id: UUID) -> String? {
-        category(id: id)?.name
+        categoryNamesByID[id]
     }
 
     func tags(in categoryID: UUID) -> [CustomTag] {
-        tags.filter { $0.categoryID == categoryID }
+        tagsByCategoryID[categoryID] ?? []
     }
 
     func tag(id: UUID) -> CustomTag? {
-        tags.first(where: { $0.id == id })
+        tagsByID[id]
     }
 
     func assignedTags(for photoSetID: UUID) -> [CustomTag] {
         guard let assignment = assignments[photoSetID] else { return [] }
-        return tags.filter { assignment.tagIDs.contains($0.id) }
+        return assignment.tagIDs.compactMap { tagsByID[$0] }
     }
 
     func assignedTagIDs(for photoSetID: UUID) -> Set<UUID> {
@@ -76,6 +96,7 @@ final class TagStore: ObservableObject {
     func addCategory(name: String) -> TagCategory {
         let category = TagCategory(name: name)
         categories.append(category)
+        updateIndexes()
         save()
         return category
     }
@@ -83,6 +104,7 @@ final class TagStore: ObservableObject {
     func renameCategory(id: UUID, to name: String) {
         guard let index = categories.firstIndex(where: { $0.id == id }) else { return }
         categories[index].name = name
+        updateIndexes()
         save()
     }
 
@@ -93,6 +115,7 @@ final class TagStore: ObservableObject {
         for key in assignments.keys {
             assignments[key]?.tagIDs.subtract(removedTagIDs)
         }
+        updateIndexes()
         save()
     }
 
@@ -118,6 +141,7 @@ final class TagStore: ObservableObject {
         let selectedColor = colorHex ?? palette[tags.count % palette.count]
         let tag = CustomTag(name: name, categoryID: categoryID, hotkey: hotkey, colorHex: selectedColor)
         tags.append(tag)
+        updateIndexes()
         save()
         return tag
     }
@@ -125,6 +149,7 @@ final class TagStore: ObservableObject {
     func updateTag(_ tag: CustomTag) {
         guard let index = tags.firstIndex(where: { $0.id == tag.id }) else { return }
         tags[index] = tag
+        updateIndexes()
         save()
     }
 
@@ -133,30 +158,29 @@ final class TagStore: ObservableObject {
         for key in assignments.keys {
             assignments[key]?.tagIDs.remove(id)
         }
+        updateIndexes()
         save()
     }
 
     // MARK: - Assignment management
 
     func setTags(_ tagIDs: Set<UUID>, for photoSetID: UUID) {
-        let valid = Set(tags.map(\.id))
-        let filtered = tagIDs.intersection(valid)
+        let filtered = tagIDs.filter { tagsByID[$0] != nil }
         if filtered.isEmpty {
             assignments.removeValue(forKey: photoSetID)
         } else {
-            assignments[photoSetID] = PhotoTagAssignment(photoSetID: photoSetID, tagIDs: filtered)
+            assignments[photoSetID] = PhotoTagAssignment(photoSetID: photoSetID, tagIDs: Set(filtered))
         }
         save()
     }
 
     func setTagsBatch(_ batch: [UUID: Set<UUID>]) {
-        let valid = Set(tags.map(\.id))
         for (photoSetID, tagIDs) in batch {
-            let filtered = tagIDs.intersection(valid)
+            let filtered = tagIDs.filter { tagsByID[$0] != nil }
             if filtered.isEmpty {
                 assignments.removeValue(forKey: photoSetID)
             } else {
-                assignments[photoSetID] = PhotoTagAssignment(photoSetID: photoSetID, tagIDs: filtered)
+                assignments[photoSetID] = PhotoTagAssignment(photoSetID: photoSetID, tagIDs: Set(filtered))
             }
         }
         save()
@@ -202,12 +226,26 @@ final class TagStore: ObservableObject {
             tags = decoded.tags
             let map = Dictionary(uniqueKeysWithValues: decoded.assignments.map { ($0.photoSetID, $0) })
             assignments = map
+            updateIndexes()
         } catch {
             print("Failed to load TagStore JSON: \(error)")
         }
     }
 
     func save() {
+        saveTask?.cancel()
+        saveTask = Task {
+            do {
+                try await Task.sleep(nanoseconds: 500_000_000)
+                guard !Task.isCancelled else { return }
+                performSave()
+            } catch {
+                // Task was cancelled
+            }
+        }
+    }
+
+    private func performSave() {
         let shape = PersistedShape(
             categories: categories,
             tags: tags,
@@ -238,6 +276,7 @@ final class TagStore: ObservableObject {
             CustomTag(name: "Dancing",  categoryID: action.id, hotkey: "d", colorHex: "#F472B6")
         ]
 
-        save()
+        updateIndexes()
+        performSave()
     }
 }

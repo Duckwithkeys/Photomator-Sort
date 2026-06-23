@@ -90,7 +90,7 @@ final class ThumbnailLoader: ObservableObject {
         // 1. Try to load using the fast ImageIO CGImageSource in a detached task
         let maxPixelSize = max(size.width, size.height)
         let ext = url.pathExtension.lowercased()
-        let alwaysCreate = ["heic", "heif", "hif", "raf", "arw", "cr2", "cr3", "nef", "dng", "orf", "rw2", "pef"].contains(ext)
+        let alwaysCreate = FileExtension.rawLikeExtensions.contains(ext)
         let decodeTask = Task.detached(priority: .userInitiated) { () -> CGImage? in
             if Task.isCancelled { return nil }
             guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }

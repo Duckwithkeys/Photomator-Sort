@@ -34,11 +34,17 @@ enum FileExtension: String, CaseIterable, Sendable {
         .rawFuji, .rawGeneric, .rawSony, .rawCanon2, .rawCanon3, .rawNikon, .rawAdobe, .rawOlympus, .rawPanasonic, .rawPentax,
         .hif, .heic, .heif, .jpeg, .jpegExtended
     ]
+
+    static let rawLikeExtensions: Set<String> = [
+        "heic", "heif", "hif", "raf", "arw", "cr2", "cr3", "nef", "dng", "orf", "rw2", "pef"
+    ]
 }
 
 // MARK: - Scanner
 
-actor FileScanner {
+private let knownExtensions: Set<String> = Set(FileExtension.allCases.map { $0.rawValue })
+
+struct FileScanner: Sendable {
 
     struct ScanResult: Sendable {
         let sourceDirectories: [URL]
@@ -64,96 +70,40 @@ actor FileScanner {
 
     /// Scan a directory recursively, suitable for choosing an SD card root.
     func scanDirectory(_ url: URL, jpegOnly: Bool = false) async throws -> ScanResult {
-        let fm = FileManager.default
-        guard fm.isReadableFile(atPath: url.path),
-              fm.isDirectory(atPath: url.path)
-        else {
-            throw ScanError.notADirectory(url.path)
-        }
-
-        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isPackageKey, .isRegularFileKey]
-        guard let enumerator = fm.enumerator(
-            at: url,
-            includingPropertiesForKeys: Array(keys),
-            options: [.skipsHiddenFiles]
-        ) else {
-            throw ScanError.notADirectory(url.path)
-        }
-
-        // Group by folder + base name so duplicate camera filenames in different
-        // shoots do not collapse into one asset.
-        var mediaURLsByBaseName: [String: [URL]] = [:]
-        var sidecars: [String: URL] = [:]
-        var ignoredFileCount = 0
-
-        while let itemURL = enumerator.nextObject() as? URL {
-            try Task.checkCancellation()
-
-            guard let extensionKind = FileExtension(rawValue: itemURL.pathExtension.lowercased()) else {
-                if itemURL.hasDirectoryPath {
-                    continue
-                }
-
-                ignoredFileCount += 1
-                continue
+        try await Task.detached(priority: .userInitiated) {
+            let fm = FileManager.default
+            guard fm.isReadableFile(atPath: url.path),
+                  fm.isDirectory(atPath: url.path)
+            else {
+                throw ScanError.notADirectory(url.path)
             }
 
-            let values = try itemURL.resourceValues(forKeys: keys)
-            let baseName = itemURL.deletingPathExtension().lastPathComponent
-            let groupingKey = Self.groupingKey(for: itemURL)
-
-            if FileExtension.imageExtensions.contains(extensionKind),
-               values.isRegularFile == true,
-               !baseName.isEmpty {
-                if jpegOnly && extensionKind != .jpeg && extensionKind != .jpegExtended {
-                    ignoredFileCount += 1
-                    continue
-                }
-                mediaURLsByBaseName[groupingKey, default: []].append(itemURL)
-            } else if extensionKind == .photoEdit,
-                      (values.isRegularFile == true || values.isDirectory == true || values.isPackage == true),
-                      !baseName.isEmpty {
-                if jpegOnly {
-                    ignoredFileCount += 1
-                    continue
-                }
-                sidecars[groupingKey] = itemURL
-
-                if values.isDirectory == true || values.isPackage == true {
-                    enumerator.skipDescendants()
-                }
-            } else {
-                ignoredFileCount += 1
+            let keys: Set<URLResourceKey> = [
+                .isDirectoryKey, .isPackageKey, .isRegularFileKey,
+                .fileSizeKey, .contentModificationDateKey
+            ]
+            guard let enumerator = fm.enumerator(
+                at: url,
+                includingPropertiesForKeys: Array(keys),
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) else {
+                throw ScanError.notADirectory(url.path)
             }
-        }
 
-        let photoSets = Self.assemble(media: mediaURLsByBaseName, sidecars: sidecars)
-        let total = photoSets.reduce(0) { $0 + $1.allFiles.count }
+            var mediaURLsByBaseName: [String: [URL]] = [:]
+            var sidecars: [String: URL] = [:]
+            var ignoredFileCount = 0
 
-        return ScanResult(
-            sourceDirectories: [url],
-            photoSets: photoSets,
-            scannedFileCount: total,
-            ignoredFileCount: ignoredFileCount
-        )
-    }
-
-    /// Group a flat list of individual files (e.g. dropped or imported via the
-    /// open panel) into PhotoSets using the same base-name + sidecar logic as a
-    /// recursive directory scan.
-    func scanFiles(_ urls: [URL], jpegOnly: Bool = false) async -> ScanResult {
-        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isPackageKey, .isRegularFileKey]
-
-        var mediaURLsByBaseName: [String: [URL]] = [:]
-        var sidecars: [String: URL] = [:]
-        var ignoredFileCount = 0
-        var failedFiles: [URL] = []
-
-        for itemURL in urls {
-            do {
+            while let itemURL = enumerator.nextObject() as? URL {
                 try Task.checkCancellation()
 
-                guard let extensionKind = FileExtension(rawValue: itemURL.pathExtension.lowercased()) else {
+                let ext = itemURL.pathExtension.lowercased()
+                guard knownExtensions.contains(ext),
+                      let extensionKind = FileExtension(rawValue: ext)
+                else {
+                    if itemURL.hasDirectoryPath {
+                        continue
+                    }
                     ignoredFileCount += 1
                     continue
                 }
@@ -178,24 +128,90 @@ actor FileScanner {
                         continue
                     }
                     sidecars[groupingKey] = itemURL
+
+                    if values.isDirectory == true || values.isPackage == true {
+                        enumerator.skipDescendants()
+                    }
                 } else {
                     ignoredFileCount += 1
                 }
-            } catch {
-                failedFiles.append(itemURL)
             }
-        }
 
-        let photoSets = Self.assemble(media: mediaURLsByBaseName, sidecars: sidecars)
-        let total = photoSets.reduce(0) { $0 + $1.allFiles.count }
+            let photoSets = Self.assemble(media: mediaURLsByBaseName, sidecars: sidecars)
+            let total = photoSets.reduce(0) { $0 + $1.allFiles.count }
 
-        return ScanResult(
-            sourceDirectories: [],
-            photoSets: photoSets,
-            scannedFileCount: total,
-            ignoredFileCount: ignoredFileCount,
-            failedDirectories: failedFiles
-        )
+            return ScanResult(
+                sourceDirectories: [url],
+                photoSets: photoSets,
+                scannedFileCount: total,
+                ignoredFileCount: ignoredFileCount
+            )
+        }.value
+    }
+
+    /// Group a flat list of individual files (e.g. dropped or imported via the
+    /// open panel) into PhotoSets using the same base-name + sidecar logic as a
+    /// recursive directory scan.
+    func scanFiles(_ urls: [URL], jpegOnly: Bool = false) async -> ScanResult {
+        await Task.detached(priority: .userInitiated) {
+            let keys: Set<URLResourceKey> = [.isDirectoryKey, .isPackageKey, .isRegularFileKey]
+
+            var mediaURLsByBaseName: [String: [URL]] = [:]
+            var sidecars: [String: URL] = [:]
+            var ignoredFileCount = 0
+            var failedFiles: [URL] = []
+
+            for itemURL in urls {
+                do {
+                    try Task.checkCancellation()
+
+                    let ext = itemURL.pathExtension.lowercased()
+                    guard knownExtensions.contains(ext),
+                          let extensionKind = FileExtension(rawValue: ext)
+                    else {
+                        ignoredFileCount += 1
+                        continue
+                    }
+
+                    let values = try itemURL.resourceValues(forKeys: keys)
+                    let baseName = itemURL.deletingPathExtension().lastPathComponent
+                    let groupingKey = Self.groupingKey(for: itemURL)
+
+                    if FileExtension.imageExtensions.contains(extensionKind),
+                       values.isRegularFile == true,
+                       !baseName.isEmpty {
+                        if jpegOnly && extensionKind != .jpeg && extensionKind != .jpegExtended {
+                            ignoredFileCount += 1
+                            continue
+                        }
+                        mediaURLsByBaseName[groupingKey, default: []].append(itemURL)
+                    } else if extensionKind == .photoEdit,
+                              (values.isRegularFile == true || values.isDirectory == true || values.isPackage == true),
+                              !baseName.isEmpty {
+                        if jpegOnly {
+                            ignoredFileCount += 1
+                            continue
+                        }
+                        sidecars[groupingKey] = itemURL
+                    } else {
+                        ignoredFileCount += 1
+                    }
+                } catch {
+                    failedFiles.append(itemURL)
+                }
+            }
+
+            let photoSets = Self.assemble(media: mediaURLsByBaseName, sidecars: sidecars)
+            let total = photoSets.reduce(0) { $0 + $1.allFiles.count }
+
+            return ScanResult(
+                sourceDirectories: [],
+                photoSets: photoSets,
+                scannedFileCount: total,
+                ignoredFileCount: ignoredFileCount,
+                failedDirectories: failedFiles
+            )
+        }.value
     }
 
     /// Build sorted PhotoSets by merging sidecars into matching base names.
@@ -222,7 +238,7 @@ actor FileScanner {
         }
 
         photoSets.sort {
-            $0.baseName.localizedStandardCompare($1.baseName) == .orderedAscending
+            $0.baseName < $1.baseName
         }
 
         return photoSets
@@ -264,7 +280,7 @@ actor FileScanner {
             }
 
             allPhotoSets.sort {
-                $0.baseName.localizedStandardCompare($1.baseName) == .orderedAscending
+                $0.baseName < $1.baseName
             }
 
             return ScanResult(
@@ -282,7 +298,10 @@ actor FileScanner {
     }
 
     private static func displayBaseName(for groupingKey: String) -> String {
-        URL(fileURLWithPath: groupingKey).lastPathComponent
+        if let slash = groupingKey.lastIndex(of: "/") {
+            return String(groupingKey[groupingKey.index(after: slash)...])
+        }
+        return groupingKey
     }
 }
 
