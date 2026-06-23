@@ -20,8 +20,6 @@ final class UserPreferences: ObservableObject {
     @Published var lastLooseFilePaths: [String] = []
     @Published var lastDestinationDirectoryID: String?
     @Published var lastFilterRule: PhotoFilterRule = .allPhotos
-    @Published var lastNamingPreset: ExportNamingPreset = .dateOriginalSequence
-    @Published var lastJpegQuality: Double = 0.92
     @Published var isJpegOnlyMode: Bool = false
     @Published var isInspectorOpen: Bool = false
 
@@ -36,8 +34,6 @@ final class UserPreferences: ObservableObject {
         static let source      = "lastSourceDirectory" // for migration
         static let destination = "lastDestinationDirectory"
         static let filter      = "lastFilterRule"
-        static let naming      = "lastNamingPreset"
-        static let jpegQuality = "lastJpegQuality"
         static let isJpegOnlyMode = "isJpegOnlyMode"
         static let isInspectorOpen = "isInspectorOpen"
         static let tagManagerHotkey = "tagManagerHotkey"
@@ -53,8 +49,6 @@ final class UserPreferences: ObservableObject {
         UserDefaults.standard.set(lastLooseFilePaths, forKey: Keys.looseFiles)
         UserDefaults.standard.set(lastDestinationDirectoryID, forKey: Keys.destination)
         UserDefaults.standard.set(lastFilterRule.rawValue, forKey: Keys.filter)
-        UserDefaults.standard.set(lastNamingPreset.rawValue, forKey: Keys.naming)
-        UserDefaults.standard.set(lastJpegQuality, forKey: Keys.jpegQuality)
         UserDefaults.standard.set(isJpegOnlyMode, forKey: Keys.isJpegOnlyMode)
         UserDefaults.standard.set(isInspectorOpen, forKey: Keys.isInspectorOpen)
         UserDefaults.standard.set(tagManagerHotkey, forKey: Keys.tagManagerHotkey)
@@ -79,15 +73,6 @@ final class UserPreferences: ObservableObject {
             lastFilterRule = rule
         }
 
-        if let raw = UserDefaults.standard.string(forKey: Keys.naming),
-           let preset = ExportNamingPreset(rawValue: raw) {
-            lastNamingPreset = preset
-        }
-
-        if let val = UserDefaults.standard.object(forKey: Keys.jpegQuality) as? Double {
-            lastJpegQuality = val
-        }
-
         isJpegOnlyMode = UserDefaults.standard.bool(forKey: Keys.isJpegOnlyMode)
         isInspectorOpen = UserDefaults.standard.bool(forKey: Keys.isInspectorOpen)
 
@@ -103,8 +88,6 @@ final class UserPreferences: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Keys.source)
         UserDefaults.standard.removeObject(forKey: Keys.destination)
         UserDefaults.standard.removeObject(forKey: Keys.filter)
-        UserDefaults.standard.removeObject(forKey: Keys.naming)
-        UserDefaults.standard.removeObject(forKey: Keys.jpegQuality)
         UserDefaults.standard.removeObject(forKey: Keys.isJpegOnlyMode)
         UserDefaults.standard.removeObject(forKey: Keys.isInspectorOpen)
         UserDefaults.standard.removeObject(forKey: Keys.tagManagerHotkey)
@@ -116,8 +99,6 @@ final class UserPreferences: ObservableObject {
         lastLooseFilePaths = []
         lastDestinationDirectoryID = nil
         lastFilterRule = .allPhotos
-        lastNamingPreset = .dateOriginalSequence
-        lastJpegQuality = 0.92
         isJpegOnlyMode = false
         isInspectorOpen = false
         tagManagerHotkey = "cmd+t"

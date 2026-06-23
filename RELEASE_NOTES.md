@@ -1,6 +1,6 @@
-# DuckSort v1.2.4 (Swift Concurrency & Threading Performance Optimizations)
+# DuckSort v1.2.4 (Swift Concurrency & Performance Optimizations & JPEG Export Cleanups)
 
-Welcome to version 1.2.4 of **DuckSort**! This release implements major performance improvements throughout the app's backend and UI systems, focusing on Swift concurrency optimization, O(1) index lookups, concurrent file transfers, and dynamic color memoization to deliver massive performance speedups on large photo libraries.
+Welcome to version 1.2.4 of **DuckSort**! This release implements major performance improvements throughout the app's backend and UI systems (focusing on Swift concurrency optimization, O(1) index lookups, concurrent file transfers, and dynamic color memoization to deliver massive performance speedups on large photo libraries) and cleans up the UI by removing the deprecated user-facing JPEG export feature.
 
 ## ✨ What's New in v1.2.4
 * **Parallelized & Bounded File Transfers**:
@@ -16,6 +16,9 @@ Welcome to version 1.2.4 of **DuckSort**! This release implements major performa
   - Converted the computed theme colors into static constants, caching the `NSColor` dynamic provider instances once to eliminate allocation overhead during SwiftUI redrawing while retaining full native system appearance updates.
   - Stored expensive computed properties like preview URLs, display names, and format lists directly on `PhotoSet` at initialization, preventing redundant allocations on every grid cell redraw.
   - Added a Combine-based 120ms debounce pipeline to search bar filtering to avoid recalculating visible results on every individual keystroke.
+* **Removed User-Facing JPEG Export**:
+  - Removed the ability to export photos to new JPEG files via the UI, simplifying the Transfer Footer, the Large Image Viewer sidebar, and internal transfer view models.
+  - **Note**: General JPEG format support (detecting, displaying, previewing, and copying/moving JPEG files during library transfers) remains fully supported and unchanged.
 
 ---
 

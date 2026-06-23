@@ -2,8 +2,8 @@
 //  RoutedOperation.swift
 //  PhotomatorSort
 //
-//  Defines the three routed operations (copy, move, export JPEG) and the
-//  common plan / result types they share. All three use the same
+//  Defines the two routed operations (copy, move) and the
+//  common plan / result types they share. Both use the same
 //  ExportPathRule to build per-photo destination folders.
 //
 
@@ -57,23 +57,17 @@ struct RoutedPlan: Sendable {
     let baseDestination: URL
     let rule: [ExportPathComponent]
     let photos: [RoutedPhoto]
-    let jpegQuality: Double
-    let namingPreset: ExportNamingPreset
 
     init(
         operation: RoutedOperation,
         baseDestination: URL,
         rule: [ExportPathComponent],
-        photos: [RoutedPhoto],
-        jpegQuality: Double = 0.92,
-        namingPreset: ExportNamingPreset = .dateOriginalSequence
+        photos: [RoutedPhoto]
     ) {
         self.operation = operation
         self.baseDestination = baseDestination
         self.rule = rule
         self.photos = photos
-        self.jpegQuality = jpegQuality
-        self.namingPreset = namingPreset
     }
 }
 

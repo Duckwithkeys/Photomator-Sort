@@ -2,14 +2,12 @@
 //  RoutedTransferService.swift
 //  PhotomatorSort
 //
-//  Executes copy, move, and JPEG export using the same export routing rule.
+//  Executes copy and move using the same export routing rule.
 //  For each photo in the plan it computes a destination folder via
 //  ExportPathRouter, then performs the requested operation.
 //
 
 import Foundation
-import ImageIO
-import UniformTypeIdentifiers
 
 actor RoutedTransferService {
 
@@ -240,61 +238,7 @@ actor RoutedTransferService {
         return (fileSize, sidecarFailed, job.sourceURL, dest)
     }
 
-    // MARK: - JPEG writing
 
-    private func writeJPEG(from sourceURL: URL, to destinationURL: URL, quality: Double, tagNames: Set<String>) throws {
-        guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
-              let destination = CGImageDestinationCreateWithURL(
-                destinationURL as CFURL,
-                UTType.jpeg.identifier as CFString,
-                1,
-                nil
-              )
-        else {
-            throw ExportError.cannotCreateJPEG(sourceURL.lastPathComponent)
-        }
-        let sourceProperties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] ?? [:]
-        var destinationProperties = sourceProperties
-        destinationProperties[kCGImageDestinationLossyCompressionQuality] = quality
-        destinationProperties = XMPTaggingService.mergingKeywords(tagNames, into: destinationProperties)
-
-        CGImageDestinationAddImage(destination, image, destinationProperties as CFDictionary)
-        guard CGImageDestinationFinalize(destination) else {
-            throw ExportError.cannotCreateJPEG(sourceURL.lastPathComponent)
-        }
-    }
-
-    private func exportFileName(
-        base: String,
-        metadata: MetadataSnapshot,
-        sequence: Int,
-        preset: ExportNamingPreset
-    ) -> String {
-        let parts = preset.tokens.map { token in
-            switch token {
-            case .originalName:
-                return base
-            case .captureDate:
-                return Self.dateFileName(for: metadata.captureDate)
-            case .sequence:
-                return String(format: "%04d", sequence)
-            case .cameraModel:
-                return FilenameSanitizer.clean(metadata.cameraModel ?? "", fallback: "Unknown Camera")
-            case .lensModel:
-                return FilenameSanitizer.clean(metadata.lensModel ?? "", fallback: "Unknown Lens")
-            }
-        }
-        return FilenameSanitizer.clean(parts.joined(separator: "_")) + ".jpg"
-    }
-
-    private static func dateFileName(for date: Date?) -> String {
-        guard let date else { return "Unknown-Date" }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyyMMdd"
-        return formatter.string(from: date)
-    }
 
     // MARK: - Unique destination helper
 
@@ -322,21 +266,5 @@ actor RoutedTransferService {
         return original
     }
 
-    nonisolated private func uniqueDestinationURL(
-        forFileName fileName: String,
-        in directory: URL,
-        fileManager: FileManager
-    ) -> URL {
-        let original = directory.appendingPathComponent(fileName)
-        guard fileManager.fileExists(atPath: original.path) else { return original }
-        let base = original.deletingPathExtension().lastPathComponent
-        let ext = original.pathExtension
-        for index in 1...Int.max {
-            let candidate = directory.appendingPathComponent("\(base)-\(index).\(ext)")
-            if !fileManager.fileExists(atPath: candidate.path) {
-                return candidate
-            }
-        }
-        return original
-    }
+
 }

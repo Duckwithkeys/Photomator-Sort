@@ -60,20 +60,7 @@ final class PhotoLibraryViewModel: ObservableObject {
             updateDerivedState()
         }
     }
-    @Published var namingPreset: ExportNamingPreset = .dateOriginalSequence {
-        didSet {
-            guard !isInitializing else { return }
-            UserPreferences.shared.lastNamingPreset = namingPreset
-            UserPreferences.shared.save()
-        }
-    }
-    @Published var jpegQuality: Double = 0.92 {
-        didSet {
-            guard !isInitializing else { return }
-            UserPreferences.shared.lastJpegQuality = jpegQuality
-            UserPreferences.shared.save()
-        }
-    }
+
     @Published var isJpegOnlyMode: Bool = false {
         didSet {
             guard !isInitializing else { return }
@@ -136,7 +123,6 @@ final class PhotoLibraryViewModel: ObservableObject {
     private let scanner = FileScanner()
     private let xmpTagging = XMPTaggingService()         // new custom tag keywords
     private let transferService = FileTransferService()
-    private let jpegExportService = JPEGExportService()
     private let routedTransfer = RoutedTransferService()
     private let metadataReader = MetadataReader()
     private var scanTask: Task<Void, Never>?
@@ -173,8 +159,7 @@ final class PhotoLibraryViewModel: ObservableObject {
             .store(in: &cancellables)
         
         self.filterRule = UserPreferences.shared.lastFilterRule
-        self.namingPreset = UserPreferences.shared.lastNamingPreset
-        self.jpegQuality = UserPreferences.shared.lastJpegQuality
+
         self.isJpegOnlyMode = UserPreferences.shared.isJpegOnlyMode
         self.isInspectorOpen = UserPreferences.shared.isInspectorOpen
         
@@ -756,9 +741,7 @@ final class PhotoLibraryViewModel: ObservableObject {
             operation: operation,
             baseDestination: destinationDirectory,
             rule: rule.components,
-            photos: routedPhotos,
-            jpegQuality: jpegQuality,
-            namingPreset: namingPreset
+            photos: routedPhotos
         )
         
         let categoryNames = Dictionary(
