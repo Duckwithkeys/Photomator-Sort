@@ -11,7 +11,7 @@ import ImageIO
 struct ThumbnailView: View {
     let url: URL?
     var size: CGSize = CGSize(width: 300, height: 300)
-    var cornerRadius: CGFloat = 12
+    var cornerRadius: CGFloat = Theme.Radius.xl
     @StateObject private var loader = ThumbnailLoader()
 
     var body: some View {
@@ -37,8 +37,8 @@ struct ThumbnailView: View {
                         .clipped()
                 } else {
                     Image(systemName: "photo")
-                        .font(.system(size: 34))
-                        .foregroundStyle(.secondary)
+                        .font(Theme.Font.iconHero)
+                        .foregroundStyle(Theme.Color.textSecondary)
                         .frame(width: geo.size.width, height: geo.size.height)
                 }
             }

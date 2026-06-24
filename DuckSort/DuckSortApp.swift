@@ -31,7 +31,6 @@ struct DuckSortApp: App {
         WindowGroup {
             ContentView()
         }
-        .windowStyle(.hiddenTitleBar)
         .commands {
             SidebarCommands()
             TextEditingCommands()

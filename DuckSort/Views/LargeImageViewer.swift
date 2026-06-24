@@ -1,187 +1,170 @@
 //
 //  LargeImageViewer.swift
-//  PhotomatorSort
+//  DuckSort
 //
 
 import SwiftUI
 import AppKit
 
-// MARK: - Large Image Viewer (full-canvas overlay)
-
 struct LargeImageViewer: View {
     @ObservedObject var viewModel: PhotoLibraryViewModel
 
     var body: some View {
-        ZStack {
-            PhotomatorTheme.background
+        ZStack(alignment: .top) {
+            Theme.Color.background
                 .ignoresSafeArea()
 
-            HStack(spacing: 0) {
-                // Left Column (Top Bar + Image Canvas + Bottom Filmstrip)
-                VStack(spacing: 0) {
-                    // Top bar: photo info + close
-                    if let photo = viewModel.currentFocusedPhotoSet {
-                        topBar(photo)
-                    }
-
-                    // Content Area (Canvas + Filmstrip)
-                    VStack(spacing: 12) {
-                        ZStack(alignment: .topLeading) {
-                            if let photo = viewModel.currentFocusedPhotoSet {
-                                LargeImagePane(photoSet: photo)
-                                    .background(Color.black)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                            } else {
-                                VStack {
-                                    Spacer()
-                                    Text("No photos to display")
-                                        .foregroundStyle(PhotomatorTheme.textSecondary)
-                                    Spacer()
-                                }
-                                .background(Color.black)
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                            }
-
-                            if viewModel.isInspectorOpen, let photo = viewModel.currentFocusedPhotoSet {
-                                InspectorPanelView(metadata: viewModel.metadata(for: photo))
-                                    .padding(12)
-                                    .transition(.opacity.combined(with: .move(edge: .leading)))
-                            }
-                        }
-                        .background(Color.black)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-
-                        FilmstripView(viewModel: viewModel)
-                            .liquidGlassPanel()
-                    }
-                    .padding([.horizontal, .bottom], 12)
-                    .padding(.top, 12)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: viewModel.isInspectorOpen)
+            VStack(spacing: 0) {
+                // Top bar spans the full width so the right sidebar's column
+                // doesn't show a different color above it.
+                if let photo = viewModel.currentFocusedPhotoSet {
+                    topBar(photo)
                 }
 
-                // Right Column (Sidebar controls & metadata)
-                LargeImageViewerSidebar(viewModel: viewModel)
-                    .ignoresSafeArea()
+                HStack(spacing: 0) {
+                    if viewModel.isInspectorOpen {
+                        InspectorPanelView(metadata: currentMetadata)
+                            .frame(width: 280)
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                    }
+
+                    imagePane
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(Theme.Space.s12)
+
+                    LargeImageViewerSidebar(viewModel: viewModel)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Theme.Color.background)
+
+                FilmstripView(viewModel: viewModel)
             }
-            .ignoresSafeArea(edges: .top)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            .animation(.spring(response: 0.3, dampingFraction: 0.85), value: viewModel.isInspectorOpen)
         }
     }
 
-    // MARK: - Top bar
+    @ViewBuilder
+    private var imagePane: some View {
+        if let photo = viewModel.currentFocusedPhotoSet {
+            LargeImagePane(photoSet: photo)
+                .background(Theme.Color.scrim, in: RoundedRectangle(cornerRadius: Theme.Radius.xl))
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
+        } else {
+            VStack {
+                Spacer()
+                Text("No photos to display")
+                    .foregroundStyle(Theme.Color.textSecondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.Color.scrim, in: RoundedRectangle(cornerRadius: Theme.Radius.xl))
+        }
+    }
+
+    private var currentMetadata: MetadataSnapshot {
+        guard let photo = viewModel.currentFocusedPhotoSet else {
+            return MetadataSnapshot(cameraModel: nil, lensModel: nil, captureDate: nil,
+                                    aperture: nil, shutterSpeed: nil, iso: nil)
+        }
+        return viewModel.metadata(for: photo)
+    }
 
     @ViewBuilder
     private func topBar(_ photo: PhotoSet) -> some View {
-        HStack(spacing: 12) {
-            Spacer().frame(width: 72) // Space for macOS traffic lights
+        HStack(spacing: Theme.Space.s12) {
+            // Leading: counter + name + indicators
+            HStack(spacing: Theme.Space.s8) {
+                Text("\(viewModel.focusedPhotoIndex + 1) / \(viewModel.filteredPhotoSets.count)")
+                    .font(Theme.Font.monoCaption)
+                    .foregroundStyle(Theme.Color.textSecondary)
+                    .layoutPriority(2)
 
-            // Navigation counter
-            Text("\(viewModel.focusedPhotoIndex + 1) / \(viewModel.filteredPhotoSets.count)")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(PhotomatorTheme.textSecondary)
+                Text(photo.baseName)
+                    .font(Theme.Font.body)
+                    .foregroundStyle(Theme.Color.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .layoutPriority(1)
 
-            // Photo name
-            Text(photo.baseName)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(PhotomatorTheme.textPrimary)
-                .lineLimit(1)
-                
-            if photo.pick == 1 || photo.pick == -1 {
-                Image(systemName: photo.pick == 1 ? "flag.fill" : "flag.slash.fill")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(photo.pick == 1 ? .red : .orange)
-            }
-            
-            if let rating = photo.rating, rating > 0 {
-                HStack(spacing: 2) {
-                    Image(systemName: "star.fill")
-                        .foregroundStyle(.yellow)
-                    Text("\(rating)")
-                }
-                .font(.caption.weight(.bold))
-                .foregroundStyle(PhotomatorTheme.textPrimary)
-            }
-
-            Spacer()
-
-            // Assigned tags
-            let tags = viewModel.assignedTags(for: photo)
-            if !tags.isEmpty {
-                HStack(spacing: 4) {
-                    ForEach(tags) { tag in
-                        HStack(spacing: 3) {
-                            Circle()
-                                .fill(tag.color)
-                                .frame(width: 6, height: 6)
-                            Text(tag.name)
-                                .font(.caption2)
+                HStack(spacing: Theme.Space.s4) {
+                    if let rating = photo.rating, rating > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "star.fill")
+                                .foregroundStyle(Theme.Color.rating)
+                            Text("\(rating)")
+                                .font(Theme.Font.caption)
+                                .foregroundStyle(Theme.Color.textPrimary)
                         }
-                        .foregroundStyle(PhotomatorTheme.textPrimary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(tag.color.opacity(0.2), in: Capsule())
+                    }
+                    if photo.pick == 1 || photo.pick == -1 {
+                        Image(systemName: photo.pick == 1 ? "flag.fill" : "flag.slash.fill")
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(photo.pick == 1 ? Theme.Color.danger : Theme.Color.warning)
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Spacer()
-
-            // Selection checkbox (checkmark button)
-            Button {
-                viewModel.toggleSelection(for: photo.id)
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: photo.isSelected ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(photo.isSelected ? .green : PhotomatorTheme.textSecondary)
-                    Text(photo.isSelected ? "Selected" : "Unselected")
-                        .foregroundStyle(PhotomatorTheme.textPrimary)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .liquidGlassButton(isHovered: false, isApplied: photo.isSelected, accentColor: .green)
+            // Trailing: actions
+            HStack(spacing: Theme.Space.s8) {
+                selectionButton(photo)
+                inspectorButton
+                closeButton
             }
-            .buttonStyle(.plain)
-            .help("Toggle selection (S)")
-
-            // Info toggle button
-            Button {
-                viewModel.isInspectorOpen.toggle()
-            } label: {
-                Image(systemName: "info.circle")
-                    .font(.body)
-                    .foregroundStyle(viewModel.isInspectorOpen ? Color.accentColor : PhotomatorTheme.textSecondary)
-                    .padding(6)
-                    .liquidGlassButton(isHovered: false, isApplied: viewModel.isInspectorOpen)
-            }
-            .buttonStyle(.plain)
-            .help("Toggle Metadata Inspector (I)")
-
-            // Close button
-            Button {
-                viewModel.closeLargeImageViewer()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.body)
-                    .foregroundStyle(PhotomatorTheme.textSecondary)
-                    .padding(6)
-                    .liquidGlassButton(isHovered: false)
-            }
-            .buttonStyle(.plain)
-            .help("Close viewer (Esc)")
         }
-        .padding(.trailing, 12)
-        .padding(.top, 10) // Matches ContentView's top padding for traffic lights
-        .padding(.bottom, 8)
-        .background(
-            Rectangle()
-                .fill(PhotomatorTheme.background)
-                .ignoresSafeArea()
-        )
-        .overlay(
-            Rectangle()
-                .frame(height: 1)
-                .foregroundStyle(PhotomatorTheme.separator),
-            alignment: .bottom
-        )
+        .padding(.horizontal, Theme.Space.s12)
+        .frame(height: 44)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.Color.background)
+        .overlay(Divider(), alignment: .bottom)
+    }
+
+    private func selectionButton(_ photo: PhotoSet) -> some View {
+        Button {
+            viewModel.toggleSelection(for: photo.id)
+        } label: {
+            HStack(spacing: Theme.Space.s6) {
+                Image(systemName: photo.isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(photo.isSelected ? Theme.Color.success : Theme.Color.textSecondary)
+                Text(photo.isSelected ? "Selected" : "Select")
+                    .foregroundStyle(Theme.Color.textPrimary)
+                    .font(Theme.Font.caption)
+            }
+            .padding(.horizontal, Theme.Space.s10)
+            .padding(.vertical, Theme.Space.s4)
+            .liquidGlassButton(isApplied: photo.isSelected, accentColor: Theme.Color.success)
+        }
+        .buttonStyle(.plain)
+        .help("Toggle selection (S)")
+    }
+
+    private var inspectorButton: some View {
+        Button {
+            viewModel.isInspectorOpen.toggle()
+        } label: {
+            Image(systemName: "info.circle")
+                .font(.body)
+                .foregroundStyle(viewModel.isInspectorOpen ? Theme.Color.accent : Theme.Color.textSecondary)
+                .padding(Theme.Space.s6)
+                .liquidGlassButton(isApplied: viewModel.isInspectorOpen)
+        }
+        .buttonStyle(.plain)
+        .help("Toggle Metadata Inspector (I)")
+    }
+
+    private var closeButton: some View {
+        Button {
+            viewModel.closeLargeImageViewer()
+        } label: {
+            Image(systemName: "xmark")
+                .font(.body)
+                .foregroundStyle(Theme.Color.textSecondary)
+                .padding(Theme.Space.s6)
+                .liquidGlassButton()
+        }
+        .buttonStyle(.plain)
+        .help("Close viewer (Esc)")
     }
 }

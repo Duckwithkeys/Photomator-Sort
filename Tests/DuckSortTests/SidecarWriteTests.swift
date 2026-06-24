@@ -46,7 +46,6 @@ final class SidecarWriteTests: XCTestCase {
         let dir = try TempDir.make()
         defer { try? FileManager.default.removeItem(at: dir) }
         
-        let sourceMedia = dir.appendingPathComponent("IMG_0003.RAF")
         let sourceSidecar = dir.appendingPathComponent("IMG_0003.xmp")
         
         let initialXMP = """

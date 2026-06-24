@@ -523,7 +523,27 @@ final class PhotoLibraryViewModel: ObservableObject {
         }
         self.photoSets = updated
     }
-    
+
+    // MARK: - Sidebar filter state
+
+    @Published var isSidebarHidden: Bool = false
+
+    var activeFilterCount: Int {
+        selectedTagFilters.count
+            + selectedFlags.count
+            + selectedRatings.count
+            + (selectedSubfolderFilter == nil ? 0 : 1)
+    }
+
+    func clearAllFilters() {
+        selectedTagFilters.removeAll()
+        selectedFlags.removeAll()
+        selectedRatings.removeAll()
+        selectedSubfolderFilter = nil
+        searchText = ""
+    }
+
+
     // MARK: - Large image viewer navigation
     
     func openLargeImageViewer() {

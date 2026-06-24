@@ -3,8 +3,6 @@
 //  DuckSort
 //
 //  The "Tags" tab of the unified Settings window.
-//  Fixed 200px sidebar (category list) + right panel with flat alternating
-//  tag table (Tag Name | Hotkey | Color) plus inline add-row footer.
 //
 
 import SwiftUI
@@ -51,19 +49,17 @@ private struct TagsCategorySidebar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
             HStack {
                 Text("CATEGORIES")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(dsColor( "#8A8A8E"))
+                    .font(Theme.Font.caption2)
                     .tracking(0.3)
+                    .foregroundStyle(Theme.Color.textSecondary)
                 Spacer()
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 10)
-            .padding(.bottom, 6)
+            .padding(.horizontal, Theme.Space.s12)
+            .padding(.top, Theme.Space.s10)
+            .padding(.bottom, Theme.Space.s6)
 
-            // Category rows
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(tagStore.categories) { category in
@@ -79,33 +75,32 @@ private struct TagsCategorySidebar: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // Footer: add new category
             Rectangle()
-                .fill(dsColor( "#323232"))
-                .frame(height: 1)
+                .fill(Theme.Color.surfaceDivider)
+                .frame(height: Theme.Stroke.hairline)
 
-            HStack(spacing: 4) {
+            HStack(spacing: Theme.Space.s4) {
                 TextField("New category", text: $newCategoryName)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white)
+                    .font(Theme.Font.subheadline)
+                    .foregroundStyle(Theme.Color.textInverse)
                     .focused($isAddFieldFocused)
                     .onSubmit(commitNewCategory)
 
                 Button(action: commitNewCategory) {
                     Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: Theme.Space.s12, weight: .medium))
                         .foregroundStyle(
                             newCategoryName.trimmingCharacters(in: .whitespaces).isEmpty
-                                ? dsColor( "#3C3C3E")
-                                : dsColor( "#8A8A8E")
+                                ? Theme.Color.surfaceStroke
+                                : Theme.Color.textSecondary
                         )
                 }
                 .buttonStyle(.plain)
                 .disabled(newCategoryName.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, Theme.Space.s12)
+            .padding(.vertical, Theme.Space.s8)
         }
     }
 
@@ -129,31 +124,31 @@ private struct CategorySidebarRow: View {
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(spacing: 8) {
+            HStack(spacing: Theme.Space.s8) {
                 Image(systemName: "folder")
-                    .font(.system(size: 11))
-                    .foregroundStyle(isSelected ? .white : dsColor( "#8A8A8E"))
+                    .font(.system(size: Theme.Space.s10))
+                    .foregroundStyle(isSelected ? Theme.Color.textInverse : Theme.Color.textSecondary)
                     .frame(width: 14)
 
                 Text(category.name)
                     .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
-                    .foregroundStyle(isSelected ? .white : dsColor( "#AEAEB2"))
+                    .foregroundStyle(isSelected ? Theme.Color.textInverse : Theme.Color.textPrimary)
                     .lineLimit(1)
 
                 Spacer()
 
                 if tagCount > 0 {
                     Text("\(tagCount)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(isSelected ? Color.white.opacity(0.65) : dsColor( "#636366"))
+                        .font(Theme.Font.footnote)
+                        .foregroundStyle(isSelected ? Theme.Color.textInverse.opacity(0.65) : Theme.Color.textTertiary)
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.horizontal, Theme.Space.s10)
+            .padding(.vertical, Theme.Space.s8)
             .background(
                 isSelected
-                    ? dsColor( "#0A84FF")
-                    : (isHovered ? Color.white.opacity(0.05) : Color.clear)
+                    ? Theme.Color.accent
+                    : (isHovered ? Theme.Color.overlaySofter : Color.clear)
             )
         }
         .buttonStyle(.plain)
@@ -185,33 +180,31 @@ private struct TagsDetailPanel: View {
     var body: some View {
         if let category = selectedCategory {
             VStack(spacing: 0) {
-                // Column headers
                 HStack(spacing: 0) {
                     Text("Tag Name")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(dsColor( "#636366"))
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Color.textTertiary)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.leading, 16)
+                        .padding(.leading, Theme.Space.s16)
 
                     Text("Hotkey")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(dsColor( "#636366"))
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Color.textTertiary)
                         .frame(width: 110, alignment: .center)
 
                     Text("Color")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(dsColor( "#636366"))
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Color.textTertiary)
                         .frame(width: 64, alignment: .center)
-                        .padding(.trailing, 16)
+                        .padding(.trailing, Theme.Space.s16)
                 }
-                .padding(.vertical, 8)
-                .background(dsColor( "#1E1E1E"))
+                .padding(.vertical, Theme.Space.s8)
+                .background(Theme.Color.surfaceBase)
 
                 Rectangle()
-                    .fill(dsColor( "#2C2C2E"))
-                    .frame(height: 1)
+                    .fill(Theme.Color.surfaceRaised)
+                    .frame(height: Theme.Stroke.hairline)
 
-                // Tag rows
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(Array(tagsInCategory.enumerated()), id: \.element.id) { index, tag in
@@ -222,7 +215,6 @@ private struct TagsDetailPanel: View {
                             )
                         }
 
-                        // Add row footer
                         AddTagRow(
                             onCommit: { name, colorHex in
                                 commitNewTag(for: category, name: name, colorHex: colorHex)
@@ -236,12 +228,12 @@ private struct TagsDetailPanel: View {
             VStack {
                 Spacer()
                 Image(systemName: "tag")
-                    .font(.system(size: 28, weight: .light))
-                    .foregroundStyle(dsColor( "#3C3C3E"))
+                    .font(Theme.Font.iconLarge)
+                    .foregroundStyle(Theme.Color.surfaceStroke)
                 Text("Select a category")
-                    .font(.system(size: 13))
-                    .foregroundStyle(dsColor( "#636366"))
-                    .padding(.top, 6)
+                    .font(Theme.Font.body)
+                    .foregroundStyle(Theme.Color.textTertiary)
+                    .padding(.top, Theme.Space.s6)
                 Spacer()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -265,12 +257,10 @@ private struct TagTableRow: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // Tag name — inline editable
             TagNameField(tag: tag, tagStore: tagStore)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 16)
+                .padding(.leading, Theme.Space.s16)
 
-            // Hotkey recorder
             ShortcutRecorderView(hotkey: Binding(
                 get: { tag.hotkey },
                 set: { newValue in
@@ -281,7 +271,6 @@ private struct TagTableRow: View {
             ))
             .frame(width: 110, alignment: .center)
 
-            // Color capsule picker
             HStack {
                 Spacer()
                 ColorPicker("", selection: Binding(
@@ -297,22 +286,21 @@ private struct TagTableRow: View {
                 Spacer()
             }
             .frame(width: 64)
-            .padding(.trailing, isHovered ? 0 : 16)
+            .padding(.trailing, isHovered ? 0 : Theme.Space.s16)
 
-            // Hover-reveal delete button
             if isHovered {
                 Button(action: { tagStore.deleteTag(id: tag.id) }) {
                     Image(systemName: "minus.circle")
                         .font(.system(size: 15))
-                        .foregroundStyle(dsColor( "#FF453A"))
+                        .foregroundStyle(Theme.Color.danger)
                 }
                 .buttonStyle(.plain)
-                .padding(.trailing, 16)
+                .padding(.trailing, Theme.Space.s16)
                 .transition(.opacity.combined(with: .scale(scale: 0.8)))
             }
         }
         .frame(height: 36)
-        .background(rowIndex % 2 == 1 ? Color.white.opacity(0.03) : Color.clear)
+        .background(rowIndex % 2 == 1 ? Theme.Color.overlaySofter : Color.clear)
         .contentShape(Rectangle())
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.12)) { isHovered = hovering }
@@ -338,15 +326,15 @@ private struct TagNameField: View {
             }
         ))
         .textFieldStyle(.plain)
-        .font(.system(size: 13))
-        .foregroundStyle(.white)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
+        .font(Theme.Font.body)
+        .foregroundStyle(Theme.Color.textInverse)
+        .padding(.horizontal, Theme.Space.s6)
+        .padding(.vertical, Theme.Space.s4)
         .background(
-            RoundedRectangle(cornerRadius: 5)
+            RoundedRectangle(cornerRadius: Theme.Radius.s)
                 .stroke(
-                    isFocused || isHovered ? dsColor( "#0A84FF").opacity(0.6) : Color.clear,
-                    lineWidth: 1
+                    isFocused || isHovered ? Theme.Color.accent.opacity(0.6) : Color.clear,
+                    lineWidth: Theme.Stroke.hairline
                 )
         )
         .focused($isFocused)
@@ -367,7 +355,7 @@ private struct AddTagRow: View {
             "#4D96FF", "#A78BFA", "#F472B6", "#6BCB77",
             "#38BDF8", "#FB923C", "#A7F3D0", "#C084FC"
         ]
-        return dsColor( palette.randomElement() ?? "#4D96FF")
+        return Color(hex: palette.randomElement() ?? "#4D96FF") ?? Theme.Color.accent
     }()
     @State private var isHovered = false
     @FocusState private var isFocused: Bool
@@ -381,46 +369,35 @@ private struct AddTagRow: View {
     }
 
     private let palette = [
-        "#FF6B6B", // Coral Red
-        "#FFA94D", // Pastel Orange
-        "#FFD43B", // Yellow Gold
-        "#4ECDC4", // Mint Teal
-        "#4D96FF", // Royal Blue
-        "#A78BFA", // Lavender Purple
-        "#F472B6", // Warm Rose
-        "#6BCB77", // Soft Green
-        "#38BDF8", // Sky Blue
-        "#FB923C", // Tangerine
-        "#A7F3D0", // Emerald Green
-        "#C084FC"  // Orchid Purple
+        "#FF6B6B", "#FFA94D", "#FFD43B", "#4ECDC4",
+        "#4D96FF", "#A78BFA", "#F472B6", "#6BCB77",
+        "#38BDF8", "#FB923C", "#A7F3D0", "#C084FC"
     ]
 
     var body: some View {
         HStack(spacing: 0) {
             TextField("Add new tag…", text: $name)
                 .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .foregroundStyle(canSubmit ? .white : dsColor( "#636366"))
+                .font(Theme.Font.body)
+                .foregroundStyle(canSubmit ? Theme.Color.textInverse : Theme.Color.textTertiary)
                 .onSubmit(submit)
                 .focused($isFocused)
                 .padding(.leading, 22)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             if canSubmit {
-                // Color swatch picker for the new tag
                 ColorPicker("", selection: $color, supportsOpacity: false)
                     .labelsHidden()
                     .frame(width: 28, height: 20)
-                    .padding(.trailing, 8)
+                    .padding(.trailing, Theme.Space.s8)
 
-                // Add button
                 Button(action: submit) {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: 18))
-                        .foregroundStyle(dsColor( "#0A84FF"))
+                        .foregroundStyle(Theme.Color.accent)
                 }
                 .buttonStyle(.plain)
-                .padding(.trailing, 14)
+                .padding(.trailing, Theme.Space.s14)
             }
         }
         .frame(height: 36)
@@ -429,13 +406,13 @@ private struct AddTagRow: View {
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.1)) { isHovered = hovering }
         }
-        .background(isHovered ? Color.white.opacity(0.02) : Color.clear)
+        .background(isHovered ? Theme.Color.overlaySofter : Color.clear)
     }
 
     private func submit() {
         guard canSubmit else { return }
         onCommit(name, colorHex)
         name = ""
-        color = dsColor( palette.randomElement() ?? "#4D96FF")
+        color = Color(hex: palette.randomElement() ?? "#4D96FF") ?? Theme.Color.accent
     }
 }

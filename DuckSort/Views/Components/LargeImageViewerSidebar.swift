@@ -1,6 +1,6 @@
 //
 //  LargeImageViewerSidebar.swift
-//  PhotomatorSort
+//  DuckSort
 //
 
 import SwiftUI
@@ -11,106 +11,98 @@ struct LargeImageViewerSidebar: View {
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    
-                    // MARK: - Section 1: Tags
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("ACTIVE TAGS")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: Theme.Space.s20) {
+
+                    // Section 1: Tags
+                    VStack(alignment: .leading, spacing: Theme.Space.s10) {
+                        sectionHeader("ACTIVE TAGS")
 
                         if let photo = viewModel.currentFocusedPhotoSet {
                             let assignedTags = viewModel.assignedTags(for: photo)
-                            
+
                             if assignedTags.isEmpty {
                                 Text("No tags applied")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .font(Theme.Font.caption)
+                                    .foregroundStyle(Theme.Color.textSecondary)
                             } else {
-                                VStack(alignment: .leading, spacing: 6) {
+                                VStack(alignment: .leading, spacing: Theme.Space.s6) {
                                     ForEach(assignedTags) { tag in
-                                        HStack(spacing: 6) {
+                                        HStack(spacing: Theme.Space.s6) {
                                             Circle()
                                                 .fill(tag.color)
                                                 .frame(width: 8, height: 8)
                                             Text(tag.name)
-                                                .font(.caption.weight(.medium))
-                                                .foregroundStyle(.primary)
-                                            
+                                                .font(Theme.Font.caption)
+                                                .foregroundStyle(Theme.Color.textPrimary)
                                             Spacer()
-                                            
                                             Button {
                                                 viewModel.removeTag(tag, from: photo.id)
                                             } label: {
                                                 Image(systemName: "xmark.circle.fill")
-                                                    .font(.caption2)
-                                                    .foregroundStyle(.secondary)
+                                                    .font(Theme.Font.caption2)
+                                                    .foregroundStyle(Theme.Color.textSecondary)
                                             }
                                             .buttonStyle(.plain)
                                             .help("Remove tag")
                                         }
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 5)
-                                        .background(tag.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                                        .padding(.horizontal, Theme.Space.s8)
+                                        .padding(.vertical, Theme.Space.s4)
+                                        .background(tag.color.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.Radius.m))
                                     }
                                 }
                             }
                         } else {
                             Text("No photo selected")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(Theme.Font.caption)
+                                .foregroundStyle(Theme.Color.textSecondary)
                         }
                     }
 
                     Divider()
-                        .background(PhotomatorTheme.separator)
 
-                    // MARK: - Section 2: Metadata
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("IMAGE METADATA")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.secondary)
+                    // Section 2: Metadata
+                    VStack(alignment: .leading, spacing: Theme.Space.s12) {
+                        sectionHeader("IMAGE METADATA")
 
                         if let photo = viewModel.currentFocusedPhotoSet {
                             let meta = viewModel.metadata(for: photo)
-                            
-                            VStack(alignment: .leading, spacing: 10) {
+
+                            VStack(alignment: .leading, spacing: Theme.Space.s10) {
                                 metadataField(label: "Filename", value: photo.baseName, systemImage: "photo")
-                                metadataField(label: "Files in Set", value: "\(photo.mediaCount) files\(photo.hasEdit ? " + edit" : "")", systemImage: photo.hasEdit ? "wand.and.stars" : "link", iconColor: photo.hasEdit ? .orange : .secondary)
+                                metadataField(label: "Files in Set", value: "\(photo.mediaCount) files\(photo.hasEdit ? " + edit" : "")",
+                                              systemImage: photo.hasEdit ? "wand.and.stars" : "link",
+                                              iconColor: photo.hasEdit ? Theme.Color.warning : Theme.Color.textSecondary)
                                 metadataField(label: "Captured", value: meta.captureDate.map(formatDate) ?? "—", systemImage: "calendar")
-                                metadataField(label: "Camera", value: meta.cameraModel ?? "—", systemImage: "camera")
-                                metadataField(label: "Lens", value: meta.lensModel ?? "—", systemImage: "camera.macro")
+                                metadataField(label: "Camera",   value: meta.cameraModel ?? "—", systemImage: "camera")
+                                metadataField(label: "Lens",     value: meta.lensModel ?? "—", systemImage: "camera.macro")
                             }
                         } else {
                             Text("No photo selected")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(Theme.Font.caption)
+                                .foregroundStyle(Theme.Color.textSecondary)
                         }
                     }
 
                     Divider()
-                        .background(PhotomatorTheme.separator)
 
-                    // MARK: - Section 3: Export Preview
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("ROUTED EXPORT PREVIEW")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.secondary)
+                    // Section 3: Export Preview
+                    VStack(alignment: .leading, spacing: Theme.Space.s10) {
+                        sectionHeader("ROUTED EXPORT PREVIEW")
 
                         if let photo = viewModel.currentFocusedPhotoSet {
                             let meta = viewModel.metadata(for: photo)
                             let tags = viewModel.assignedTags(for: photo)
 
-                            VStack(alignment: .leading, spacing: 8) {
+                            VStack(alignment: .leading, spacing: Theme.Space.s8) {
                                 if let rule = viewModel.ruleStore.selectedRule {
-                                    VStack(alignment: .leading, spacing: 4) {
+                                    VStack(alignment: .leading, spacing: Theme.Space.s4) {
                                         Text("Active Rule")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                            .font(Theme.Font.caption)
+                                            .foregroundStyle(Theme.Color.textSecondary)
                                         Text(rule.name)
-                                            .font(.caption.weight(.medium))
+                                            .font(Theme.Font.caption)
                                     }
-                                    
+
                                     if let dest = viewModel.destinationDirectory {
                                         let folders = ExportPathRouter.destinationFolders(
                                             base: dest,
@@ -121,14 +113,14 @@ struct LargeImageViewerSidebar: View {
                                             viewModel.tagStore.categoryName(id: $0)
                                         }
 
-                                        VStack(alignment: .leading, spacing: 4) {
+                                        VStack(alignment: .leading, spacing: Theme.Space.s4) {
                                             Text(folders.count <= 1 ? "Folder Destination" : "Folder Destinations")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
+                                                .font(Theme.Font.caption)
+                                                .foregroundStyle(Theme.Color.textSecondary)
                                             ForEach(folders, id: \.self) { folder in
                                                 Text(folder.path)
-                                                    .font(.caption2.monospaced())
-                                                    .foregroundStyle(.secondary)
+                                                    .font(Theme.Font.monoBody)
+                                                    .foregroundStyle(Theme.Color.textSecondary)
                                                     .lineLimit(2)
                                                     .truncationMode(.middle)
                                             }
@@ -136,45 +128,49 @@ struct LargeImageViewerSidebar: View {
                                     }
                                 } else {
                                     Text("No rule selected")
-                                        .font(.caption)
-                                        .foregroundStyle(.orange)
+                                        .font(Theme.Font.caption)
+                                        .foregroundStyle(Theme.Color.warning)
                                 }
                             }
-                            .padding(10)
+                            .padding(Theme.Space.s10)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(PhotomatorTheme.background, in: RoundedRectangle(cornerRadius: 6))
+                            .background(Theme.Color.cellBackground, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(PhotomatorTheme.separator, lineWidth: 1)
+                                RoundedRectangle(cornerRadius: Theme.Radius.m)
+                                    .stroke(Theme.Color.separator, lineWidth: Theme.Stroke.hairline)
                             )
                         }
                     }
                 }
-                .padding(14)
+                .padding(Theme.Space.s14)
             }
         }
         .frame(width: 260)
-        .background(PhotomatorTheme.background)
-        .border(width: 1, edges: [.leading], color: PhotomatorTheme.separator)
+        .background(Theme.Color.sidebarBackground)
+        .overlay(Divider(), alignment: .leading)
     }
 
-    // MARK: - Helper Views / Formatters
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(Theme.Font.subheadline)
+            .foregroundStyle(Theme.Color.textSecondary)
+    }
 
-    private func metadataField(label: String, value: String, systemImage: String, iconColor: Color = .secondary) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+    private func metadataField(label: String, value: String, systemImage: String, iconColor: Color = Theme.Color.textSecondary) -> some View {
+        HStack(alignment: .top, spacing: Theme.Space.s8) {
             Image(systemName: systemImage)
-                .font(.system(size: 11))
+                .font(Theme.Font.caption)
                 .foregroundStyle(iconColor)
                 .frame(width: 14, alignment: .center)
                 .padding(.top, 2)
-            
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(label)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(Theme.Font.caption2)
+                    .foregroundStyle(Theme.Color.textSecondary)
                 Text(value)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.primary)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Color.textPrimary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -186,39 +182,5 @@ struct LargeImageViewerSidebar: View {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter.string(from: date)
-    }
-}
-
-
-
-// MARK: - Border Modifier Helper
-
-extension View {
-    func border(width: CGFloat, edges: [Edge], color: Color) -> some View {
-        overlay(EdgeBorder(width: width, edges: edges).foregroundColor(color))
-    }
-}
-
-struct EdgeBorder: Shape {
-    var width: CGFloat
-    var edges: [Edge]
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        for edge in edges {
-            let edgeRect: CGRect
-            switch edge {
-            case .top:
-                edgeRect = CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: width)
-            case .bottom:
-                edgeRect = CGRect(x: rect.minX, y: rect.maxY - width, width: rect.width, height: width)
-            case .leading:
-                edgeRect = CGRect(x: rect.minX, y: rect.minY, width: width, height: rect.height)
-            case .trailing:
-                edgeRect = CGRect(x: rect.maxX - width, y: rect.minY, width: width, height: rect.height)
-            }
-            path.addRect(edgeRect)
-        }
-        return path
     }
 }

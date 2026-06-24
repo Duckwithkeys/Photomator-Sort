@@ -3,8 +3,6 @@
 //  DuckSort
 //
 //  The "Rules" tab of the unified Settings window.
-//  Fixed 200px sidebar (rule set list) + right detail panel (rule editor).
-//  Matches the macOS Safari preferences aesthetic described in the spec.
 //
 
 import SwiftUI
@@ -32,19 +30,17 @@ private struct RulesSidebar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Section header
             HStack {
                 Text("MY RULE SETS")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(dsColor( "#8A8A8E"))
+                    .font(Theme.Font.caption2)
                     .tracking(0.3)
+                    .foregroundStyle(Theme.Color.textSecondary)
                 Spacer()
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 10)
-            .padding(.bottom, 6)
+            .padding(.horizontal, Theme.Space.s12)
+            .padding(.top, Theme.Space.s10)
+            .padding(.bottom, Theme.Space.s6)
 
-            // Rule list
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(ruleStore.rules) { rule in
@@ -60,34 +56,33 @@ private struct RulesSidebar: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // Divider + add field
             Rectangle()
-                .fill(dsColor("#323232"))
-                .frame(height: 1)
-                .padding(.horizontal, 16)
+                .fill(Theme.Color.surfaceDivider)
+                .frame(height: Theme.Stroke.hairline)
+                .padding(.horizontal, Theme.Space.s16)
 
-            HStack(spacing: 4) {
+            HStack(spacing: Theme.Space.s4) {
                 TextField("New rule set", text: $newRuleName)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white)
+                    .font(Theme.Font.subheadline)
+                    .foregroundStyle(Theme.Color.textInverse)
                     .focused($isAddFieldFocused)
                     .onSubmit(commitNewRule)
 
                 Button(action: commitNewRule) {
                     Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: Theme.Space.s12, weight: .medium))
                         .foregroundStyle(
                             newRuleName.trimmingCharacters(in: .whitespaces).isEmpty
-                                ? dsColor("#3C3C3E")
-                                : dsColor("#8A8A8E")
+                                ? Theme.Color.surfaceStroke
+                                : Theme.Color.textSecondary
                         )
                 }
                 .buttonStyle(.plain)
                 .disabled(newRuleName.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.horizontal, Theme.Space.s16)
+            .padding(.vertical, Theme.Space.s10)
         }
     }
 
@@ -110,35 +105,35 @@ private struct RuleSidebarRow: View {
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(spacing: 8) {
+            HStack(spacing: Theme.Space.s8) {
                 Image(systemName: "circle")
-                    .font(.system(size: 11))
-                    .foregroundStyle(isSelected ? .white : dsColor( "#8A8A8E"))
+                    .font(.system(size: Theme.Space.s10))
+                    .foregroundStyle(isSelected ? Theme.Color.textInverse : Theme.Color.textSecondary)
                     .frame(width: 14)
 
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: Theme.Space.s2) {
                     Text(rule.name)
                         .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
-                        .foregroundStyle(isSelected ? .white : dsColor( "#AEAEB2"))
+                        .foregroundStyle(isSelected ? Theme.Color.textInverse : Theme.Color.textPrimary)
                         .lineLimit(1)
                     if !rule.components.isEmpty {
                         Text(ExportPathRouter.describe(rule.components) {
                             tagStore.categoryName(id: $0)
                         })
-                        .font(.system(size: 10))
-                        .foregroundStyle(isSelected ? Color.white.opacity(0.65) : dsColor( "#636366"))
+                        .font(Theme.Font.badge)
+                        .foregroundStyle(isSelected ? Theme.Color.textInverse.opacity(0.65) : Theme.Color.textTertiary)
                         .lineLimit(1)
                     }
                 }
 
                 Spacer()
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.horizontal, Theme.Space.s10)
+            .padding(.vertical, Theme.Space.s6)
             .background(
                 isSelected
-                    ? dsColor( "#0A84FF")
-                    : (isHovered ? Color.white.opacity(0.05) : Color.clear)
+                    ? Theme.Color.accent
+                    : (isHovered ? Theme.Color.overlaySofter : Color.clear)
             )
         }
         .buttonStyle(.plain)
@@ -164,12 +159,12 @@ private struct RulesDetailPanel: View {
             VStack {
                 Spacer()
                 Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 28, weight: .light))
-                    .foregroundStyle(dsColor( "#3C3C3E"))
+                    .font(Theme.Font.iconLarge)
+                    .foregroundStyle(Theme.Color.surfaceStroke)
                 Text("Select a rule set to edit")
-                    .font(.system(size: 13))
-                    .foregroundStyle(dsColor( "#636366"))
-                    .padding(.top, 6)
+                    .font(Theme.Font.body)
+                    .foregroundStyle(Theme.Color.textTertiary)
+                    .padding(.top, Theme.Space.s6)
                 Spacer()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -184,11 +179,10 @@ private struct RuleEditorDetail: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Rule Name field
-            HStack(spacing: 12) {
+            HStack(spacing: Theme.Space.s12) {
                 Text("Rule Name:")
-                    .font(.system(size: 13))
-                    .foregroundStyle(dsColor( "#8A8A8E"))
+                    .font(Theme.Font.body)
+                    .foregroundStyle(Theme.Color.textSecondary)
                     .frame(width: 80, alignment: .trailing)
 
                 TextField("Rule name", text: Binding(
@@ -200,40 +194,39 @@ private struct RuleEditorDetail: View {
                     }
                 ))
                 .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
+                .font(Theme.Font.body)
+                .foregroundStyle(Theme.Color.textInverse)
+                .padding(.horizontal, Theme.Space.s8)
+                .padding(.vertical, Theme.Space.s4)
                 .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.white.opacity(0.06))
+                    RoundedRectangle(cornerRadius: Theme.Radius.m)
+                        .fill(Theme.Color.overlaySoft)
                         .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(dsColor( "#3C3C3E"), lineWidth: 1)
+                            RoundedRectangle(cornerRadius: Theme.Radius.m)
+                                .stroke(Theme.Color.surfaceStroke, lineWidth: Theme.Stroke.hairline)
                         )
                 )
 
                 Spacer()
 
                 Text("\(rule.components.count) folder level\(rule.components.count == 1 ? "" : "s")")
-                    .font(.system(size: 11))
-                    .foregroundStyle(dsColor( "#636366"))
+                    .font(Theme.Font.footnote)
+                    .foregroundStyle(Theme.Color.textTertiary)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.horizontal, Theme.Space.s16)
+            .padding(.vertical, Theme.Space.s12)
 
             Rectangle()
-                .fill(dsColor( "#2C2C2E"))
-                .frame(height: 1)
-                .padding(.horizontal, 16)
+                .fill(Theme.Color.surfaceRaised)
+                .frame(height: Theme.Stroke.hairline)
+                .padding(.horizontal, Theme.Space.s16)
 
-            // Component rows
             if rule.components.isEmpty {
                 VStack {
                     Spacer()
                     Text("No folder levels yet. Add one below.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(dsColor( "#636366"))
+                        .font(Theme.Font.subheadline)
+                        .foregroundStyle(Theme.Color.textTertiary)
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -248,7 +241,7 @@ private struct RuleEditorDetail: View {
                             tagStore: tagStore
                         )
                         .listRowBackground(Color.clear)
-                        .listRowSeparatorTint(dsColor( "#2C2C2E"))
+                        .listRowSeparatorTint(Theme.Color.surfaceRaised)
                         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                     }
                     .onMove { from, to in
@@ -263,11 +256,10 @@ private struct RuleEditorDetail: View {
             }
 
             Rectangle()
-                .fill(dsColor( "#2C2C2E"))
-                .frame(height: 1)
-                .padding(.horizontal, 16)
+                .fill(Theme.Color.surfaceRaised)
+                .frame(height: Theme.Stroke.hairline)
+                .padding(.horizontal, Theme.Space.s16)
 
-            // "Add Folder Level" menu
             HStack {
                 Spacer()
 
@@ -284,20 +276,20 @@ private struct RuleEditorDetail: View {
                     Divider()
                     Button("Custom Text…") { addComponent(.customText("Custom"), to: rule) }
                 } label: {
-                    HStack(spacing: 5) {
+                    HStack(spacing: Theme.Space.s4) {
                         Text("Add Folder Level")
-                            .font(.system(size: 12))
+                            .font(Theme.Font.subheadline)
                         Image(systemName: "plus")
-                            .font(.system(size: 11))
+                            .font(.system(size: Theme.Space.s10))
                     }
-                    .foregroundStyle(dsColor("#0A84FF"))
+                    .foregroundStyle(Theme.Color.accent)
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.horizontal, Theme.Space.s16)
+            .padding(.vertical, Theme.Space.s10)
         }
     }
 
@@ -317,17 +309,15 @@ private struct RuleComponentRow: View {
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            // Drag handle
+        HStack(spacing: Theme.Space.s10) {
             Image(systemName: "line.3.horizontal")
-                .font(.system(size: 11))
-                .foregroundStyle(dsColor("#636366"))
+                .font(.system(size: Theme.Space.s10))
+                .foregroundStyle(Theme.Color.textTertiary)
 
-            // Icon + label/picker/text, tightly grouped
-            HStack(spacing: 8) {
+            HStack(spacing: Theme.Space.s8) {
                 Image(systemName: component.systemImage)
-                    .font(.system(size: 13))
-                    .foregroundStyle(dsColor("#8A8A8E"))
+                    .font(Theme.Font.body)
+                    .foregroundStyle(Theme.Color.textSecondary)
                     .frame(width: 18)
 
                 componentContent
@@ -335,19 +325,18 @@ private struct RuleComponentRow: View {
 
             Spacer()
 
-            // Remove button — always visible when hovered
             if isHovered {
                 Button(action: removeComponent) {
                     Image(systemName: "minus.circle")
                         .font(.system(size: 15))
-                        .foregroundStyle(dsColor("#FF453A"))
+                        .foregroundStyle(Theme.Color.danger)
                 }
                 .buttonStyle(.plain)
                 .transition(.opacity.combined(with: .scale(scale: 0.8)))
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.horizontal, Theme.Space.s16)
+        .padding(.vertical, Theme.Space.s8)
         .contentShape(Rectangle())
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.12)) { isHovered = hovering }
@@ -359,8 +348,8 @@ private struct RuleComponentRow: View {
         switch component {
         case .cameraModel, .lensModel, .captureDate:
             Text(component.displayName)
-                .font(.system(size: 13))
-                .foregroundStyle(.white)
+                .font(Theme.Font.body)
+                .foregroundStyle(Theme.Color.textInverse)
 
         case .tagCategory(let id):
             Picker("", selection: Binding(
@@ -379,7 +368,7 @@ private struct RuleComponentRow: View {
                 }
             }
             .labelsHidden()
-            .font(.system(size: 13))
+            .font(Theme.Font.body)
             .frame(maxWidth: 160, alignment: .leading)
 
         case .customText(let text):
@@ -392,14 +381,17 @@ private struct RuleComponentRow: View {
                 }
             ))
             .textFieldStyle(.plain)
-            .font(.system(size: 13))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
+            .font(Theme.Font.body)
+            .foregroundStyle(Theme.Color.textInverse)
+            .padding(.horizontal, Theme.Space.s6)
+            .padding(.vertical, Theme.Space.s4)
             .background(
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(Color.white.opacity(0.06))
-                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(dsColor( "#3C3C3E"), lineWidth: 1))
+                RoundedRectangle(cornerRadius: Theme.Radius.s)
+                    .fill(Theme.Color.overlaySoft)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.s)
+                            .stroke(Theme.Color.surfaceStroke, lineWidth: Theme.Stroke.hairline)
+                    )
             )
             .frame(maxWidth: 160)
         }

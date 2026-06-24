@@ -42,7 +42,7 @@ final class FileScannerTests: XCTestCase {
             try makeFile("IMG_002.jpg")
         ]
 
-        let result = try await FileScanner().scanFiles(urls)
+        let result = await FileScanner().scanFiles(urls)
 
         XCTAssertEqual(result.photoSets.count, 2)
 
@@ -66,7 +66,7 @@ final class FileScannerTests: XCTestCase {
             try makeFile("IMG_002.jpg")
         ]
 
-        let result = try await FileScanner().scanFiles(urls, jpegOnly: true)
+        let result = await FileScanner().scanFiles(urls, jpegOnly: true)
 
         XCTAssertEqual(result.photoSets.count, 2)
         let first = try XCTUnwrap(set(named: "IMG_001", in: result))
@@ -82,7 +82,7 @@ final class FileScannerTests: XCTestCase {
             try makeFile("notes.txt")
         ]
 
-        let result = try await FileScanner().scanFiles(urls)
+        let result = await FileScanner().scanFiles(urls)
 
         XCTAssertEqual(result.photoSets.count, 1)
         XCTAssertEqual(result.ignoredFileCount, 1)

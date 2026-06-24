@@ -12,7 +12,7 @@ struct ShortcutRecorderView: View {
     @State private var localMonitor: Any? = nil
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Theme.Space.s4) {
             Button {
                 if isRecording {
                     stopRecording()
@@ -21,20 +21,24 @@ struct ShortcutRecorderView: View {
                 }
             } label: {
                 Text(buttonLabel)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(isRecording ? .white : (hotkey == nil ? .secondary : .primary))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .font(Theme.Font.monoBody)
+                    .foregroundStyle(
+                        isRecording
+                            ? Theme.Color.textInverse
+                            : (hotkey == nil ? Theme.Color.textSecondary : Theme.Color.textPrimary)
+                    )
+                    .padding(.horizontal, Theme.Space.s8)
+                    .padding(.vertical, Theme.Space.s4)
                     .frame(minWidth: 70, minHeight: 22)
                     .background(
-                        isRecording ? Color.blue : Color.white.opacity(0.06),
-                        in: RoundedRectangle(cornerRadius: 6)
+                        isRecording ? Theme.Color.accent : Theme.Color.overlaySoft,
+                        in: RoundedRectangle(cornerRadius: Theme.Radius.m)
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6)
+                        RoundedRectangle(cornerRadius: Theme.Radius.m)
                             .stroke(
-                                isRecording ? Color.blue : Color.white.opacity(0.12),
-                                lineWidth: 1
+                                isRecording ? Theme.Color.accent : Theme.Color.overlaySofter,
+                                lineWidth: Theme.Stroke.hairline
                             )
                     )
             }
@@ -46,9 +50,9 @@ struct ShortcutRecorderView: View {
                     hotkey = nil
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(4)
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Color.textSecondary)
+                        .padding(Theme.Space.s4)
                 }
                 .buttonStyle(.plain)
                 .help("Clear shortcut")
