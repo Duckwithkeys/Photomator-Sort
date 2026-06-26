@@ -33,17 +33,24 @@ struct TransferPlan: Sendable {
     let destinationDirectory: URL
     let photoSets: [PhotoSet]
     let tagNames: [UUID: Set<String>]
+    /// Pre-read EXIF metadata for every photo set. The transfer service
+    /// previously re-read this via `MetadataReader.metadata(for:)` for
+    /// each transfer, duplicating the work `loadMetadataAndTags` already
+    /// did at scan time. Keys are photo set IDs.
+    let metadata: [UUID: MetadataSnapshot]
 
     init(
         operation: TransferOperation,
         destinationDirectory: URL,
         photoSets: [PhotoSet],
-        tagNames: [UUID: Set<String>] = [:]
+        tagNames: [UUID: Set<String>] = [:],
+        metadata: [UUID: MetadataSnapshot] = [:]
     ) {
         self.operation = operation
         self.destinationDirectory = destinationDirectory
         self.photoSets = photoSets
         self.tagNames = tagNames
+        self.metadata = metadata
     }
 
     var files: [URL] {
@@ -60,7 +67,6 @@ struct TransferSummary: Sendable {
 
 actor FileTransferService {
     private let sidecarService = XMPTaggingService()
-    private let metadataReader = MetadataReader()
 
     struct TransferJob: Sendable {
         let photoSet: PhotoSet
@@ -68,6 +74,7 @@ actor FileTransferService {
         let tagNames: Set<String>
         let setMetadata: MetadataSnapshot
         let mediaSet: Set<URL>
+        let precomputedSize: Int64
     }
 
     func execute(
@@ -83,31 +90,22 @@ actor FileTransferService {
         var transferred = 0
         let files = plan.files
 
-        let totalBytes = await withTaskGroup(of: Int64.self) { group in
-            for sourceURL in files {
-                group.addTask {
-                    let fm = FileManager.default
-                    let attrs = try? fm.attributesOfItem(atPath: sourceURL.path)
-                    return attrs?[.size] as? Int64 ?? 0
-                }
-            }
-            var sum: Int64 = 0
-            for await size in group {
-                sum += size
-            }
-            return sum
-        }
-        
+        // Chunked parallel size computation — one stat() syscall per file
+        // is cheap, but spawning 1,500 tasks to do 1,500 trivial syscalls
+        // burns more time in task scheduling than in actual I/O.
+        let fileSizes = await Self.chunkedFileSizes(for: files)
+
+        let totalBytes = fileSizes.values.reduce(Int64(0), +)
         let startTime = Date()
         var completedBytes: Int64 = 0
         var sidecarFailures = 0
 
         var jobs: [TransferJob] = []
+        jobs.reserveCapacity(files.count)
         for photoSet in plan.photoSets {
             let mediaSet = Set(photoSet.mediaFiles.map { $0.standardizedFileURL })
             let tagNames = plan.tagNames[photoSet.id] ?? []
-            let setMetadata = photoSet.preferredPreviewURL
-                .map { metadataReader.metadata(for: $0) } ?? MetadataSnapshot()
+            let setMetadata = plan.metadata[photoSet.id] ?? MetadataSnapshot()
 
             for sourceURL in photoSet.allFiles {
                 jobs.append(TransferJob(
@@ -115,7 +113,8 @@ actor FileTransferService {
                     sourceURL: sourceURL,
                     tagNames: tagNames,
                     setMetadata: setMetadata,
-                    mediaSet: mediaSet
+                    mediaSet: mediaSet,
+                    precomputedSize: fileSizes[sourceURL] ?? 0
                 ))
             }
         }
@@ -179,10 +178,15 @@ actor FileTransferService {
         sidecarService: XMPTaggingService
     ) async throws -> (Int64, Bool, URL) {
         let fm = FileManager.default
-        let destinationURL = uniqueDestinationURL(
+        let destinationURL = FileNaming.uniqueDestinationURL(
             for: job.sourceURL, in: plan.destinationDirectory, fileManager: fm
         )
-        let fileSize = (try? fm.attributesOfItem(atPath: job.sourceURL.path)[.size] as? Int64) ?? 0
+        // Reuse the size from the pre-pass; only stat the file if the
+        // pre-pass missed it (shouldn't happen in normal flows).
+        var fileSize = job.precomputedSize
+        if fileSize == 0 {
+            fileSize = (try? fm.attributesOfItem(atPath: job.sourceURL.path)[.size] as? Int64) ?? 0
+        }
         let isSameLocation = job.sourceURL.standardizedFileURL == destinationURL.standardizedFileURL
 
         if !isSameLocation {
@@ -196,11 +200,12 @@ actor FileTransferService {
         if job.mediaSet.contains(job.sourceURL.standardizedFileURL) {
             let payload = SidecarPayload(
                 tagNames: job.tagNames,
-                capture: job.setMetadata
+                capture: job.setMetadata,
+                iptc: XMPTaggingService.iptcFromPreferences()
             )
             let sourceSidecarURL = XMPTaggingService.exportSidecarURL(for: job.sourceURL)
             do {
-                try await sidecarService.writeExportSidecar(
+                try sidecarService.writeExportSidecar(
                     payload,
                     besideDestinationFile: destinationURL,
                     mergingSourceSidecar: sourceSidecarURL
@@ -226,35 +231,38 @@ actor FileTransferService {
         }
     }
 
-    nonisolated private func uniqueDestinationURL(
-        for sourceURL: URL,
-        in directory: URL,
-        fileManager: FileManager
-    ) -> URL {
-        let original = directory.appendingPathComponent(sourceURL.lastPathComponent)
-        if sourceURL.standardizedFileURL == original.standardizedFileURL {
-            return original
-        }
-        guard fileManager.fileExists(atPath: original.path) else { return original }
+    /// Chunked stat() across every URL. Returns a `[URL: Int64]` map so the
+    /// transfer jobs can carry precomputed sizes and `executeJob` doesn't
+    /// need to stat files a second time for progress reporting.
+    private static func chunkedFileSizes(for files: [URL]) async -> [URL: Int64] {
+        guard !files.isEmpty else { return [:] }
+        let cores = max(1, ProcessInfo.processInfo.activeProcessorCount)
+        let chunkSize = max(50, files.count / cores)
 
-        let base = sourceURL.deletingPathExtension().lastPathComponent
-        let ext = sourceURL.pathExtension
-
-        for index in 1...Int.max {
-            let candidateName: String
-            if ext.isEmpty {
-                candidateName = "\(base)-\(index)"
-            } else {
-                candidateName = "\(base)-\(index).\(ext)"
+        return await withTaskGroup(of: [(URL, Int64)].self) { group in
+            for chunkStart in stride(from: 0, to: files.count, by: chunkSize) {
+                let upper = min(chunkStart + chunkSize, files.count)
+                let slice = Array(files[chunkStart..<upper])
+                group.addTask {
+                    let fm = FileManager.default
+                    var out: [(URL, Int64)] = []
+                    out.reserveCapacity(slice.count)
+                    for url in slice {
+                        let size = (try? fm.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
+                        out.append((url, size))
+                    }
+                    return out
+                }
             }
-
-            let candidate = directory.appendingPathComponent(candidateName)
-            if !fileManager.fileExists(atPath: candidate.path) {
-                return candidate
+            var map: [URL: Int64] = [:]
+            map.reserveCapacity(files.count)
+            for await partial in group {
+                for (url, size) in partial {
+                    map[url] = size
+                }
             }
+            return map
         }
-
-        return original
     }
 }
 

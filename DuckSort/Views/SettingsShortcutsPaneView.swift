@@ -3,8 +3,6 @@
 //  DuckSort
 //
 //  The "Shortcuts" tab of the unified Settings window.
-//  Three sections: App Actions (editable), Culling Control (static reference),
-//  and Tag Hotkeys (static reference, hidden when no tags exist).
 //
 
 import SwiftUI
@@ -54,14 +52,14 @@ private struct ShortcutsSidebarIndex: View {
         VStack(spacing: 0) {
             HStack {
                 Text("SECTIONS")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(dsColor("#8A8A8E"))
+                    .font(Theme.Font.caption2)
                     .tracking(0.3)
+                    .foregroundStyle(Theme.Color.textSecondary)
                 Spacer()
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 10)
-            .padding(.bottom, 6)
+            .padding(.horizontal, Theme.Space.s12)
+            .padding(.top, Theme.Space.s10)
+            .padding(.bottom, Theme.Space.s6)
 
             ForEach(ShortcutsSection.allCases) { section in
                 let isDisabled = section == .tagHotkeys && !tagHotkeysAvailable
@@ -91,20 +89,20 @@ private struct ShortcutsSidebarIndex: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: Theme.Space.s8) {
                 Image(systemName: icon)
-                    .font(.system(size: 11))
-                    .foregroundStyle(isSelected ? .white : dsColor("#8A8A8E"))
+                    .font(.system(size: Theme.Space.s10))
+                    .foregroundStyle(isSelected ? Theme.Color.textInverse : Theme.Color.textSecondary)
                     .frame(width: 14)
                 Text(label)
                     .font(.system(size: 13, weight: isSelected ? .bold : .regular))
-                    .foregroundStyle(isSelected ? .white : dsColor("#AEAEB2"))
+                    .foregroundStyle(isSelected ? Theme.Color.textInverse : Theme.Color.textPrimary)
                 Spacer()
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.horizontal, Theme.Space.s10)
+            .padding(.vertical, Theme.Space.s8)
             .background(
-                isSelected ? dsColor("#0A84FF") : Color.clear
+                isSelected ? Theme.Color.accent : Color.clear
             )
             .contentShape(Rectangle())
         }
@@ -142,7 +140,7 @@ private struct ShortcutsDetailContent: View {
                     ShortcutDividerRow()
                     ShortcutStaticRow(label: "Navigate Photos",        shortcut: "← → ↑ ↓")
                     ShortcutDividerRow()
-                    ShortcutStaticRow(label: "Next / Prev Category",   shortcut: "Tab / ⇧Tab")
+                    ShortcutStaticRow(label: "Next / Prev Category",   shortcut: "[ / ]")
                     ShortcutDividerRow()
                     ShortcutStaticRow(label: "Select Visible (Grid)",  shortcut: "⌘A")
                     ShortcutDividerRow()
@@ -155,10 +153,10 @@ private struct ShortcutsDetailContent: View {
                     let allTags = viewModel.tagStore.tags
                     if allTags.isEmpty {
                         Text("No tags yet. Create tags in the Tags tab to assign hotkeys.")
-                            .font(.system(size: 13))
-                            .foregroundStyle(dsColor("#636366"))
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
+                            .font(Theme.Font.body)
+                            .foregroundStyle(Theme.Color.textTertiary)
+                            .padding(.horizontal, Theme.Space.s16)
+                            .padding(.vertical, Theme.Space.s12)
                     } else {
                         let groups = ShortcutsDetailContent.groupedByCategory(
                             allTags,
@@ -179,7 +177,7 @@ private struct ShortcutsDetailContent: View {
                 Spacer().frame(height: 20)
             }
         }
-        .background(dsColor("#1E1E1E"))
+        .background(Theme.Color.surfaceBase)
     }
 }
 
@@ -190,14 +188,14 @@ private struct ShortcutsSectionHeader: View {
     var body: some View {
         HStack {
             Text(title)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(dsColor( "#636366"))
+                .font(Theme.Font.caption2)
                 .tracking(0.3)
-                .padding(.leading, 16)
+                .foregroundStyle(Theme.Color.textTertiary)
+                .padding(.leading, Theme.Space.s16)
             Spacer()
         }
-        .padding(.vertical, 8)
-        .background(dsColor( "#232323"))
+        .padding(.vertical, Theme.Space.s8)
+        .background(Theme.Color.surfaceSidebarList)
     }
 }
 
@@ -208,12 +206,12 @@ private struct ShortcutEditableRow: View {
     var body: some View {
         HStack {
             Text(label)
-                .font(.system(size: 13))
-                .foregroundStyle(.white)
-                .padding(.leading, 16)
+                .font(Theme.Font.body)
+                .foregroundStyle(Theme.Color.textInverse)
+                .padding(.leading, Theme.Space.s16)
             Spacer()
             ShortcutRecorderView(hotkey: $hotkey)
-                .padding(.trailing, 16)
+                .padding(.trailing, Theme.Space.s16)
         }
         .frame(height: 40)
     }
@@ -226,14 +224,14 @@ private struct ShortcutStaticRow: View {
     var body: some View {
         HStack {
             Text(label)
-                .font(.system(size: 13))
-                .foregroundStyle(.white)
-                .padding(.leading, 16)
+                .font(Theme.Font.body)
+                .foregroundStyle(Theme.Color.textInverse)
+                .padding(.leading, Theme.Space.s16)
             Spacer()
             Text(shortcut)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(dsColor( "#636366"))
-                .padding(.trailing, 16)
+                .font(Theme.Font.monoBody)
+                .foregroundStyle(Theme.Color.textTertiary)
+                .padding(.trailing, Theme.Space.s16)
         }
         .frame(height: 36)
     }
@@ -242,9 +240,9 @@ private struct ShortcutStaticRow: View {
 private struct ShortcutDividerRow: View {
     var body: some View {
         Rectangle()
-            .fill(dsColor("#2C2C2E"))
-            .frame(height: 1)
-            .padding(.horizontal, 16)
+            .fill(Theme.Color.surfaceRaised)
+            .frame(height: Theme.Stroke.hairline)
+            .padding(.horizontal, Theme.Space.s16)
     }
 }
 
@@ -256,25 +254,36 @@ private struct TagHotkeyRow: View {
 
     var body: some View {
         HStack {
-            HStack(spacing: 8) {
+            HStack(spacing: Theme.Space.s8) {
                 Circle()
                     .fill(tag.color)
                     .frame(width: 8, height: 8)
                 Text(tag.name)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white)
+                    .font(Theme.Font.body)
+                    .foregroundStyle(Theme.Color.textInverse)
             }
-            .padding(.leading, 16)
+            .padding(.leading, Theme.Space.s16)
             Spacer()
-            ShortcutRecorderView(hotkey: Binding(
-                get: { tag.hotkey },
-                set: { newValue in
-                    var updated = tag
-                    updated.hotkey = newValue
-                    tagStore.updateTag(updated)
+            ShortcutRecorderView(
+                hotkey: Binding(
+                    get: { tag.hotkey },
+                    set: { newValue in
+                        var updated = tag
+                        updated.hotkey = newValue
+                        tagStore.updateTag(updated)
+                    }
+                ),
+                validationMessage: { proposed in
+                    if let reason = TagHotkeyRules.reservedReason(for: proposed) {
+                        return "Used by \(reason)"
+                    }
+                    if let other = tagStore.tags.first(where: { $0.id != tag.id && $0.hotkey == proposed }) {
+                        return "Used by \(other.name)"
+                    }
+                    return nil
                 }
-            ))
-            .padding(.trailing, 16)
+            )
+            .padding(.trailing, Theme.Space.s16)
         }
         .frame(height: 40)
     }

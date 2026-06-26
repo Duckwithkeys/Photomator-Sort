@@ -1,6 +1,6 @@
 //
 //  EmptyLibraryView.swift
-//  PhotomatorSort
+//  DuckSort
 //
 
 import SwiftUI
@@ -10,62 +10,63 @@ struct EmptyLibraryView: View {
     let selectFolderAction: () -> Void
 
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: Theme.Space.s24) {
             if isScanning {
                 ProgressView()
                     .controlSize(.large)
-                Text("Scanning photoshoot...")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.primary)
+                Text("Scanning photoshoot…")
+                    .font(Theme.Font.title)
+                    .foregroundStyle(Theme.Color.textPrimary)
             } else {
                 Text("Welcome to DuckSort")
-                    .font(.largeTitle.weight(.bold))
-                    .foregroundStyle(PhotomatorTheme.textPrimary)
-                
+                    .font(Theme.Font.display)
+                    .foregroundStyle(Theme.Color.textPrimary)
+
                 Text("To get started with DuckSort, do any of the following:")
-                    .font(.subheadline)
-                    .foregroundStyle(PhotomatorTheme.textSecondary)
-                
-                HStack(spacing: 20) {
-                    VStack(spacing: 12) {
-                        Image(systemName: "square.and.arrow.down.on.square")
-                            .font(.system(size: 36))
-                            .foregroundStyle(PhotomatorTheme.textSecondary)
-                        Text("Drag files or folders directly\ninto DuckSort.")
-                            .font(.caption)
-                            .foregroundStyle(PhotomatorTheme.textSecondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(width: 200, height: 160)
-                    .background(PhotomatorTheme.cellBackground, in: RoundedRectangle(cornerRadius: 8))
-                    
-                    VStack(spacing: 12) {
-                        Image(systemName: "folder.badge.gearshape")
-                            .font(.system(size: 36))
-                            .foregroundStyle(PhotomatorTheme.textSecondary)
-                        Text("Choose Import from the File\nmenu.")
-                            .font(.caption)
-                            .foregroundStyle(PhotomatorTheme.textSecondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(width: 200, height: 160)
-                    .background(PhotomatorTheme.cellBackground, in: RoundedRectangle(cornerRadius: 8))
+                    .font(Theme.Font.subheadline)
+                    .foregroundStyle(Theme.Color.textSecondary)
+
+                HStack(spacing: Theme.Space.s20) {
+                    EmptyActionCard(
+                        systemImage: "square.and.arrow.down.on.square",
+                        title: "Drag files or folders directly\ninto DuckSort."
+                    )
+                    EmptyActionCard(
+                        systemImage: "folder.badge.gearshape",
+                        title: "Choose Import from the File\nmenu."
+                    )
                 }
-                .padding(.vertical, 20)
-                
-                Button("Import...") {
+                .padding(.vertical, Theme.Space.s20)
+
+                Button("Import…") {
                     selectFolderAction()
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .tint(PhotomatorTheme.selectedBlue)
+                .tint(Theme.Color.accent)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(PhotomatorTheme.background)
+        .background(Theme.Color.background)
         .contentShape(Rectangle())
-        .onTapGesture {
-            NSApp.keyWindow?.makeFirstResponder(nil)
+    }
+}
+
+private struct EmptyActionCard: View {
+    let systemImage: String
+    let title: String
+
+    var body: some View {
+        VStack(spacing: Theme.Space.s12) {
+            Image(systemName: systemImage)
+                .font(Theme.Font.iconHero)
+                .foregroundStyle(Theme.Color.textSecondary)
+            Text(title)
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Color.textSecondary)
+                .multilineTextAlignment(.center)
         }
+        .frame(width: 200, height: 160)
+        .background(Theme.Color.cellBackground, in: RoundedRectangle(cornerRadius: Theme.Radius.l))
     }
 }

@@ -27,7 +27,7 @@ final class ScrollStateObserver: ObservableObject {
 
     @objc private func handleScrollEnd() {
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.18, repeats: false) { _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 0.075, repeats: false) { _ in
             Task { @MainActor in
                 self.isScrolling = false
             }
@@ -37,7 +37,7 @@ final class ScrollStateObserver: ObservableObject {
     @objc private func handleScrollMove() {
         isScrolling = true
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.18, repeats: false) { _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 0.075, repeats: false) { _ in
             Task { @MainActor in
                 self.isScrolling = false
             }

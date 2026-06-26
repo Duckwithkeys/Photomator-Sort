@@ -11,7 +11,6 @@ import Foundation
 
 actor RoutedTransferService {
 
-    private let metadataReader = MetadataReader()
     private let sidecarService = XMPTaggingService()
 
     struct RoutedJob: Sendable {
@@ -21,6 +20,14 @@ actor RoutedTransferService {
         let tagNames: Set<String>
         let metadata: MetadataSnapshot
         let mediaSet: Set<URL>
+    }
+
+    /// Per-file item produced by the routing pass. Used to drive both the
+    /// size pre-pass and the progress multiplier calculation. Declared at
+    /// type scope so the static `chunkedTotalBytes` helper can read it.
+    struct FileWalkItem: Sendable {
+        let url: URL
+        let multiplier: Int
     }
 
     func execute(
@@ -46,13 +53,14 @@ actor RoutedTransferService {
         var foldersCreated = 0
         var sidecarFailures = 0
 
-        // 1. Pre-walk & compute multipliers
-        struct FileWalkItem: Sendable {
-            let url: URL
-            let multiplier: Int
+        // 0. Compute `destinationFolders` ONCE per photo. Used by phases
+        //    1, 3, and 4 below — computing it three times was the dominant
+        //    overhead on large routed transfers.
+        struct RoutingResult: Sendable {
+            let routed: RoutedPhoto
+            let folders: [URL]
         }
-        var walkItems: [FileWalkItem] = []
-        for routed in plan.photos {
+        let routingResults: [RoutingResult] = plan.photos.map { routed in
             let folders = ExportPathRouter.destinationFolders(
                 base: plan.baseDestination,
                 rule: plan.rule,
@@ -60,39 +68,28 @@ actor RoutedTransferService {
                 assignedTags: routed.tags,
                 categoryNameProvider: categoryNameProvider
             )
-            let multiplier = folders.count
-            for fileURL in routed.photoSet.allFiles {
+            return RoutingResult(routed: routed, folders: folders)
+        }
+
+        // 1. Pre-walk & compute multipliers
+        var walkItems: [FileWalkItem] = []
+        walkItems.reserveCapacity(routingResults.reduce(0) { $0 + $1.folders.count * $1.routed.photoSet.allFiles.count })
+        for result in routingResults {
+            let multiplier = result.folders.count
+            for fileURL in result.routed.photoSet.allFiles {
                 totalFiles += multiplier
                 walkItems.append(FileWalkItem(url: fileURL, multiplier: multiplier))
             }
         }
 
-        // 2. Parallel size computation
-        let totalBytes = await withTaskGroup(of: Int64.self) { group in
-            for item in walkItems {
-                group.addTask {
-                    let fm = FileManager.default
-                    let size = (try? fm.attributesOfItem(atPath: item.url.path)[.size] as? Int64) ?? 0
-                    return size * Int64(item.multiplier)
-                }
-            }
-            var sum: Int64 = 0
-            for await size in group {
-                sum += size
-            }
-            return sum
-        }
+        // 2. Chunked parallel size computation. Avoids the 1-task-per-file
+        //    overhead for very large transfers (1,500+ files) by grouping
+        //    stat() syscalls into chunks sized to activeProcessorCount.
+        let totalBytes = await Self.chunkedTotalBytes(items: walkItems)
 
         // 3. Pre-create directories sequentially to avoid race conditions
-        for routed in plan.photos {
-            let folders = ExportPathRouter.destinationFolders(
-                base: plan.baseDestination,
-                rule: plan.rule,
-                metadata: routed.metadata,
-                assignedTags: routed.tags,
-                categoryNameProvider: categoryNameProvider
-            )
-            for folder in folders {
+        for result in routingResults {
+            for folder in result.folders {
                 let existed = fm.fileExists(atPath: folder.path)
                 try fm.createDirectory(at: folder, withIntermediateDirectories: true)
                 if !existed { foldersCreated += 1 }
@@ -101,18 +98,13 @@ actor RoutedTransferService {
 
         // 4. Build job list
         var jobs: [RoutedJob] = []
-        for routed in plan.photos {
-            let folders = ExportPathRouter.destinationFolders(
-                base: plan.baseDestination,
-                rule: plan.rule,
-                metadata: routed.metadata,
-                assignedTags: routed.tags,
-                categoryNameProvider: categoryNameProvider
-            )
+        jobs.reserveCapacity(routingResults.reduce(0) { $0 + $1.folders.count * $1.routed.photoSet.allFiles.count })
+        for result in routingResults {
+            let routed = result.routed
             let mediaSet = Set(routed.photoSet.mediaFiles.map { $0.standardizedFileURL })
             let tagNames = Set(routed.tags.map(\.name))
 
-            for folder in folders {
+            for folder in result.folders {
                 for sourceURL in routed.photoSet.allFiles {
                     jobs.append(RoutedJob(
                         sourceURL: sourceURL,
@@ -223,9 +215,13 @@ actor RoutedTransferService {
         var sidecarFailed = false
         if job.mediaSet.contains(job.sourceURL.standardizedFileURL) {
             let sourceSidecar = XMPTaggingService.exportSidecarURL(for: job.sourceURL)
-            let payload = SidecarPayload(tagNames: job.tagNames, capture: job.metadata)
+            let payload = SidecarPayload(
+                tagNames: job.tagNames,
+                capture: job.metadata,
+                iptc: XMPTaggingService.iptcFromPreferences()
+            )
             do {
-                try await sidecarService.writeExportSidecar(
+                try sidecarService.writeExportSidecar(
                     payload,
                     besideDestinationFile: dest,
                     mergingSourceSidecar: sourceSidecar
@@ -240,6 +236,40 @@ actor RoutedTransferService {
 
 
 
+    // MARK: - Chunked file size computation
+
+    /// Compute total bytes across every file in `items`, applying each
+    /// item's multiplier. Groups stat() syscalls into chunks sized to
+    /// the active CPU count so 1,500 files don't spawn 1,500 task objects
+    /// for trivial work. Multiplier-aware so routed plans (one source →
+    /// many destinations) count correctly.
+    private static func chunkedTotalBytes(
+        items: [FileWalkItem]
+    ) async -> Int64 {
+        guard !items.isEmpty else { return 0 }
+        let cores = max(1, ProcessInfo.processInfo.activeProcessorCount)
+        let chunkSize = max(50, items.count / cores)
+
+        return await withTaskGroup(of: Int64.self) { group in
+            for chunkStart in stride(from: 0, to: items.count, by: chunkSize) {
+                let upper = min(chunkStart + chunkSize, items.count)
+                let slice = Array(items[chunkStart..<upper])
+                group.addTask {
+                    let fm = FileManager.default
+                    var sum: Int64 = 0
+                    for item in slice {
+                        let size = (try? fm.attributesOfItem(atPath: item.url.path)[.size] as? Int64) ?? 0
+                        sum += size * Int64(item.multiplier)
+                    }
+                    return sum
+                }
+            }
+            var total: Int64 = 0
+            for await partial in group { total += partial }
+            return total
+        }
+    }
+
     // MARK: - Unique destination helper
 
     nonisolated private func uniqueDestinationURL(
@@ -247,23 +277,9 @@ actor RoutedTransferService {
         in directory: URL,
         fileManager: FileManager
     ) -> URL {
-        let original = directory.appendingPathComponent(sourceURL.lastPathComponent)
-        if sourceURL.standardizedFileURL == original.standardizedFileURL {
-            return original
-        }
-        guard fileManager.fileExists(atPath: original.path) else { return original }
-        let base = sourceURL.deletingPathExtension().lastPathComponent
-        let ext = sourceURL.pathExtension
-        for index in 1...Int.max {
-            let candidateName = ext.isEmpty
-                ? "\(base)-\(index)"
-                : "\(base)-\(index).\(ext)"
-            let candidate = directory.appendingPathComponent(candidateName)
-            if !fileManager.fileExists(atPath: candidate.path) {
-                return candidate
-            }
-        }
-        return original
+        FileNaming.uniqueDestinationURL(
+            for: sourceURL, in: directory, fileManager: fileManager
+        )
     }
 
 

@@ -124,6 +124,28 @@ struct KeyboardShortcutInfo: Hashable, Sendable {
     }
 }
 
+enum TagHotkeyRules {
+    static let reservedPlainKeys: [String: String] = [
+        "0": "Clear rating/tags",
+        "1": "1-star rating",
+        "2": "2-star rating",
+        "3": "3-star rating",
+        "4": "4-star rating",
+        "5": "5-star rating",
+        "s": "Toggle selection",
+        "i": "Toggle inspector",
+        "z": "Flag pick",
+        "x": "Reject",
+        "u": "Clear pick"
+    ]
+
+    static func reservedReason(for hotkey: String?) -> String? {
+        guard let hotkey, !hotkey.isEmpty else { return nil }
+        let info = KeyboardShortcutInfo.parse(hotkey)
+        return reservedPlainKeys[info.key.lowercased()]
+    }
+}
+
 extension View {
     /// Applies a keyboard shortcut only when one is available, so menu commands
     /// can reflect user-customizable hotkeys without claiming a fixed binding.

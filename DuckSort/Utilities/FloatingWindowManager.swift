@@ -58,6 +58,7 @@ final class FloatingWindowManager: ObservableObject {
     @Published private(set) var isReady = false
 
     private var settingsController: NSWindowController?
+    private var xmpInspectorController: NSWindowController?
 
     private init() {}
 
@@ -85,8 +86,8 @@ final class FloatingWindowManager: ObservableObject {
         )
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 480),
-            styleMask: [.titled, .closable, .miniaturizable],
+            contentRect: NSRect(x: 0, y: 0, width: 960, height: 720),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -94,11 +95,12 @@ final class FloatingWindowManager: ObservableObject {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
+        window.minSize = NSSize(width: 820, height: 560)
         window.backgroundColor = NSColor(red: 0x1E/255, green: 0x1E/255, blue: 0x1E/255, alpha: 1)
         window.center()
 
         let hosting = NSHostingView(rootView: AnyView(view))
-        hosting.frame = NSRect(x: 0, y: 0, width: 720, height: 480 + 28)
+        hosting.frame = NSRect(x: 0, y: 0, width: 960, height: 720 + 28)
         hosting.autoresizingMask = [.width, .height]
         window.contentView = hosting
 
@@ -116,6 +118,62 @@ final class FloatingWindowManager: ObservableObject {
 
     func closeAll() {
         settingsController?.close()
+        xmpInspectorController?.close()
+    }
+
+    /// Show a small floating "XMP tag inspector" overlay listing tags found
+    /// in XMP sidecars that aren't defined in the active pack. Re-uses the
+    /// same controller if it's already open.
+    func showXMPTagInspector(viewModel: PhotoLibraryViewModel) {
+        if let controller = xmpInspectorController {
+            if let win = controller.window,
+               let hosting = win.contentView as? NSHostingView<AnyView> {
+                hosting.rootView = AnyView(
+                    XMPTagInspectorView(
+                        viewModel: viewModel,
+                        onClose: { [weak controller] in controller?.close() }
+                    )
+                )
+            }
+            controller.showWindow(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let view = XMPTagInspectorView(
+            viewModel: viewModel,
+            onClose: { [weak self] in self?.xmpInspectorController?.close() }
+        )
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 520),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "XMP Tags Not in Active Pack"
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
+        window.minSize = NSSize(width: 360, height: 320)
+        window.backgroundColor = NSColor(red: 0x1E/255, green: 0x1E/255, blue: 0x1E/255, alpha: 1)
+        window.level = .floating
+        window.center()
+
+        let hosting = NSHostingView(rootView: AnyView(view))
+        hosting.frame = NSRect(x: 0, y: 0, width: 460, height: 520 + 28)
+        hosting.autoresizingMask = [.width, .height]
+        window.contentView = hosting
+
+        let delegate = PanelDelegate { [weak self] in
+            self?.xmpInspectorController = nil
+        }
+        window.delegate = delegate
+        window.setAssociatedDelegate(delegate)
+
+        let controller = NSWindowController(window: window)
+        self.xmpInspectorController = controller
+        controller.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
 

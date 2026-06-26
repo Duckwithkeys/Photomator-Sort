@@ -156,10 +156,17 @@ enum ExportPathRouter {
         }.joined(separator: " / ")
     }
 
-    static func defaultDateFolderFormatter(_ date: Date) -> String {
+    /// Cached DateFormatter shared across every routed photo. DateFormatter
+    /// creation is ~50–100µs per call; allocating one per photo on a 5,000
+    /// photo transfer would cost ~0.25–0.5s for no good reason.
+    private static let cachedDateFolderFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: date)
+        return formatter
+    }()
+
+    static func defaultDateFolderFormatter(_ date: Date) -> String {
+        cachedDateFolderFormatter.string(from: date)
     }
 }

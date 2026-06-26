@@ -38,11 +38,26 @@ enum FileExtension: String, CaseIterable, Sendable {
     static let rawLikeExtensions: Set<String> = [
         "heic", "heif", "hif", "raf", "arw", "cr2", "cr3", "nef", "dng", "orf", "rw2", "pef"
     ]
+
+    /// Extensions that should be treated as HEIF-family image containers.
+    /// Used to pick the right decode path (NSImage native vs. ImageIO
+    /// embedded thumbnail).
+    static let heifLikeExtensions: Set<String> = ["heic", "heif", "hif"]
 }
 
 // MARK: - Scanner
 
-private let knownExtensions: Set<String> = Set(FileExtension.allCases.map { $0.rawValue })
+/// O(1) extension → enum case dictionary. Replaces the old two-step lookup
+/// (`Set.contains` + `FileExtension(rawValue:)` which internally scans every
+/// case). Built once at type-init.
+private let extensionLookup: [String: FileExtension] = {
+    var d: [String: FileExtension] = [:]
+    d.reserveCapacity(FileExtension.allCases.count)
+    for ext in FileExtension.allCases {
+        d[ext.rawValue] = ext
+    }
+    return d
+}()
 
 struct FileScanner: Sendable {
 
@@ -98,9 +113,7 @@ struct FileScanner: Sendable {
                 try Task.checkCancellation()
 
                 let ext = itemURL.pathExtension.lowercased()
-                guard knownExtensions.contains(ext),
-                      let extensionKind = FileExtension(rawValue: ext)
-                else {
+                guard let extensionKind = extensionLookup[ext] else {
                     if itemURL.hasDirectoryPath {
                         continue
                     }
@@ -166,9 +179,7 @@ struct FileScanner: Sendable {
                     try Task.checkCancellation()
 
                     let ext = itemURL.pathExtension.lowercased()
-                    guard knownExtensions.contains(ext),
-                          let extensionKind = FileExtension(rawValue: ext)
-                    else {
+                    guard let extensionKind = extensionLookup[ext] else {
                         ignoredFileCount += 1
                         continue
                     }
@@ -237,9 +248,9 @@ struct FileScanner: Sendable {
             ))
         }
 
-        photoSets.sort {
-            $0.baseName < $1.baseName
-        }
+        // Sorting moved to the ViewModel (scanSourceDirectories) so the data
+        // crosses the actor boundary in a single order instead of being
+        // sorted three times across the pipeline.
 
         return photoSets
     }
@@ -279,9 +290,9 @@ struct FileScanner: Sendable {
                 failedDirs.append(contentsOf: result.failedDirectories)
             }
 
-            allPhotoSets.sort {
-                $0.baseName < $1.baseName
-            }
+            // Sorting moved to the ViewModel (scanSourceDirectories) so the
+            // data crosses the actor boundary in a single order instead of
+            // being sorted three times across the pipeline.
 
             return ScanResult(
                 sourceDirectories: urls,

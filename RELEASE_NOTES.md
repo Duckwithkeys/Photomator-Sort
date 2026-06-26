@@ -1,4 +1,82 @@
-# DuckSort v1.2.4 (Swift Concurrency & Performance Optimizations & JPEG Export Cleanups)
+# DuckSort v1.3 (Tag Packs Redesign, Files-in-Set Inspector, HEIF Previews, Major Performance Pass)
+
+Welcome to version 1.3 of **DuckSort**! This release overhauls the Tag Packs settings UI, introduces a "Files in Set" inspector in the large viewer, brings full HEIF/HEIC preview support, adds an XMP tag inspector overlay, and ships a sweeping performance pass that retunes 25 hot paths across the codebase for O(1) lookups, single-pass filters, and pre-compiled regexes.
+
+## ✨ What's New in v1.3
+* **Tag Packs Settings Overhaul**:
+  - Removed the left "Categories" sidebar — the Tags pane is now a single full-width column so the pack strip sits cleanly above the inline editor.
+  - Settings window is resizable and starts at 960×720 (was 720×480) so multi-monitor users can keep the pack library visible while editing.
+  - **Per-tag inline color picker** on every `TagChip` — click the swatch and the native macOS color panel opens directly, no nested menu.
+  - **SF Symbol picker for tag-pack logos** — choose from a curated catalog of 50+ symbols grouped by People, Moments, Activities, Objects, and Tech, or type any SF Symbol name to use one not in the catalog.
+* **Large Viewer "Files in Set" Inspector**:
+  - Replaces the old "N files + edit" summary with a real per-file list showing every file that belongs to the set.
+  - Each row shows the actual filename (e.g. `DSCF0142.RAF`, `DSCF0142.JPG`, `DSCF0142.HEIC`, `DSCF0142.photo-edit`) with a colour-coded role chip — red for RAW, green for JPEG, indigo for HEIF, yellow for the edit sidecar.
+  - Right-click any row to **Reveal in Finder** or **Copy Filename**.
+  - **Format bug fix**: A RAW + HEIF set now correctly reports `formatLabel = "RAW + HEIF"` (it was silently classified as RAW-only before, because HEIF extensions also live in `rawLikeExtensions` and the `if/else if` chain checked RAW first).
+* **HEIF/HEIC Preview Support**:
+  - `CGImageSourceCreateThumbnailAtIndex` returns nil for some HEIC bursts and unusual orientation metadata — added a `NSImage(contentsOf:)` fallback path that uses the system codec, then down-samples to the requested pixel budget.
+  - HEIF files now reliably decode on first try, and the thumbnail `previewRank` puts them ahead of RAW so a set without a JPEG sibling shows the HEIF as its preview.
+* **XMP Tag Inspector Overlay**:
+  - **View → "XMP Tags Not in Active Pack…"** opens a floating overlay window (`⌘⇧X`) that scans every loaded photo's sidecar and lists any `dc:subject` keywords not defined as a tag in the active pack.
+  - Each row shows the orphan keyword, the count of photos using it, and example filenames.
+  - One-click **Add to Pack** writes a new tag into the active pack (preferring the `Subject` category) and rescans. The row disappears immediately via optimistic local update — no waiting for the full rescan.
+* **Sidebar Tag Filter Refinements**:
+  - The "Active Filters" bar is now permanent at the top of the sidebar's filter stack (under the search field), so the layout doesn't shift when filters are toggled.
+  - When zero filters are active, the bar renders a grayed-out "No active filters" state with a disabled Clear button.
+* **Keyboard Improvements**:
+  - **Press `I` in the grid** to open the large image viewer (was: toggled the Inspector panel).
+  - All other shortcuts unchanged.
+* **Tag Chip Visual Improvements**:
+  - Per-tag color picker styled as a prominent pill so it reads as the primary action, not a hidden nested menu.
+  - Format pills on grid cells use a consistent palette (`RAW` = red, `JPEG` = green, `HEIF` = indigo, `EDIT` = yellow) shared with the large viewer so both surfaces agree on what each colour means.
+
+## ⚡ Performance Pass (25 optimizations applied)
+
+Every item from the `prompt.txt` / `Suggestions.txt` performance playbook was implemented in a single session. All 22 tests still pass. Highlights:
+
+* **O(1) photo-set lookups** — `photoSetIndex: [UUID: Int]` rebuilt inside `photoSets` didSet; `toggleSelection`, `setSelection`, and the metadata-load result loops now use dict subscripts instead of `firstIndex(where:)`.
+* **Pre-compiled XMP regexes** — 19 inline `try? NSRegularExpression(pattern:)` calls in `XMPTaggingService` replaced with a `nonisolated static let` palette in `XMPSchema.Regex`. Mirrors `MetadataReader`'s pattern.
+* **`XMPTaggingService` is now a `Sendable struct`** — was an `actor`, which serialized all sidecar writes during concurrent transfers. Removed `await` from 9 call sites in the view model and transfer services.
+* **Single-pass `updateDerivedState`** — the 7-stage `.filter()` chain (rule → rejected → tags → flags → ratings → subfolder → search) collapsed into one `for` loop with early `continue`, short-circuiting on the first failing filter. The subfolder filter compares `.path` strings instead of resolving URLs.
+* **Merged `loadMetadata` + `loadExistingTags`** — `loadMetadataAndTags(for:)` reads EXIF and XMP sidecars in a single `withTaskGroup`, applies results in ONE `photoSets` assignment, and runs in two phases (first 100 sets visible-first, then the rest in the background).
+* **Visible-first metadata** — the first 100 photo sets load with high priority and apply immediately, so the grid is interactive 5–10× sooner on large libraries.
+* **`destinationFolders` cached** — `RoutedTransferService` computes the per-photo folder list ONCE into a `routingResults` array instead of 3 times (pre-walk → mkdir → job-build).
+* **`DateFormatter` cached** in `ExportPathRouter.defaultDateFolderFormatter` — was allocating a fresh formatter per photo on every routed transfer.
+* **Pre-read metadata** flows from `loadMetadataAndTags` through `TransferPlan.metadata` to `FileTransferService.execute`, eliminating the per-photo `CGImageSource` re-read during transfer.
+* **`.min(by:)` instead of `.sorted().first`** in `PhotoSet.init.preferredPreviewURL` — O(n log n) → O(n).
+* **Two of three redundant sorts removed** from `FileScanner`; only the final sort in `PhotoLibraryViewModel.scanSourceDirectories` remains.
+* **`allFiles` and `fileBreakdown` are stored `let`s on `PhotoSet`** (cached at init instead of computed every read) — important because `fileBreakdown` is read on every focused-photo change in the large viewer.
+* **`tagsByShortcut: [KeyboardShortcutInfo: CustomTag]`** in `TagStore` — keypress handler does one dict lookup instead of iterating every tag and re-parsing hotkey strings.
+* **`tagsByShortcut` + `colorCache`** rebuilt inside `updateIndexes()` — the keypress hotkey lookup and the per-tag `Color(hex:)` rendering now both hit caches.
+* **`PhotoSetCell: Equatable` + `EquatableView`** — unchanged cells skip body re-evaluation when one cell's selection flips.
+* **`ThumbnailCache` scales to physical memory** — 800/120MB on 8GB, 1500/200MB on 16GB, 2500/400MB on 32GB+.
+* **Run-loop coalescing** of `tagStore.objectWillChange` — `updateGlobalCounts` + `updateDerivedState` no longer fire 4× per batch tag operation.
+* **`UserPreferences.save()` debounced** (150ms) + `saveImmediately()` escape hatch — matches the existing 500ms `TagStore.save` debounce.
+* **`extensionLookup: [String: FileExtension]`** in `FileScanner` — replaces `Set.contains` + `FileExtension(rawValue:)` double lookup.
+* **`xmpSidecarURLs` dedup** — incremental `Set.insert` instead of `Array(Set(...)).sorted()` round-trip.
+* **`escape` is a single-pass character scanner** in `XMPTaggingService` (was 4 chained `replacingOccurrences`); `unescape` kept as 5 chained calls for correctness on `&amp;` ordering.
+* **`FilenameSanitizer.clean` is a single-pass unicode-scalar loop** (was `components(separatedBy:).joined()`).
+* **`uniqueDestinationURL` extracted** to `Utilities/FileNaming.swift` and shared by both transfer services — was copy-pasted.
+* **Chunked file-size computation** in both transfer services — replaces 1-task-per-file overhead with chunks sized to `activeProcessorCount`.
+
+## 🐛 Bug Fixes
+* **HEIF format classification** — `Models/PhotoSet.init` now checks JPEG → HEIF → RAW in that order. Previously HEIF files were matched by the `rawLikeExtensions` check first, so a RAW + HEIF set reported `formatLabel = "RAW"` and the thumbnail pill said only "RAW". Now correctly says "RAW + HEIF" (or whatever derivative is present).
+* **`XMPTaggingService.updateCaption`** — `String?` parameter now accepted; previously the signature forced non-optional `String` and callers passing nil would crash.
+* **`updateSidecarRatingPick`** — new helper replaces duplicated metadata-read code in `FileTransferService` and `RoutedTransferService`.
+* **`XMPTaggingService` Sendable conformance** — `ISO8601DateFormatter` is wrapped in an unchecked-Sendable box so the new struct compiles.
+* **SettingsTagsPaneView editor overflow** — fixed when adding/removing tags (height was previously miscomputed with the left-sidebar layout).
+* **Tag chip overflow** — fixed at 180pt cell width; chips no longer touch the tag name text.
+* **Grid ACTIVE ring clipping** — fixed; the ring no longer clips into the section header above the cards.
+
+## 🛠 Internal
+* `FileNaming.uniqueDestinationURL(for:in:fileManager:)` — new shared utility.
+* `XMPSchema.Regex` — pre-compiled NSRegularExpression palette for `XMPTaggingService`.
+* `LoadedPhotoInfo` (fileprivate) — compact value type used by `loadMetadataAndTags` to ferry per-photo results out of the task group.
+* `LoadedPhotoInfo`'s parent `applyMetadataAndTagResults` builds a local `[UUID: Int]` index before the result-application loop so it never does a `firstIndex(where:)` scan inside the per-photo loop.
+* `PhotoLibraryViewModel.TransferPlan.metadata` — new optional field carries pre-read EXIF metadata from scan time into the transfer pipeline.
+
+---
+
 
 Welcome to version 1.2.4 of **DuckSort**! This release implements major performance improvements throughout the app's backend and UI systems (focusing on Swift concurrency optimization, O(1) index lookups, concurrent file transfers, and dynamic color memoization to deliver massive performance speedups on large photo libraries) and cleans up the UI by removing the deprecated user-facing JPEG export feature.
 

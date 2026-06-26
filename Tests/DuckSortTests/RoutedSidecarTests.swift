@@ -41,8 +41,8 @@ final class RoutedSidecarTests: XCTestCase {
         try ImageFixture.writeJPEG(to: media, cameraModel: "X-T5", lensModel: "XF35mm", iso: 400)
 
         // Write a pre-existing source orphan sidecar beside the media file.
-        try await XMPTaggingService().writeExportSidecar(
-            SidecarPayload(tagNames: ["Old"], capture: MetadataSnapshot()),
+        try XMPTaggingService().writeExportSidecar(
+            SidecarPayload(tagNames: ["Old"], capture: MetadataSnapshot(), iptc: IPTCMetadata()),
             besideDestinationFile: media
         )
 

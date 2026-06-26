@@ -1,6 +1,6 @@
 //
 //  TransferFooter.swift
-//  PhotomatorSort
+//  DuckSort
 //
 
 import SwiftUI
@@ -11,147 +11,185 @@ struct TransferFooter: View {
     @State private var hoveredOp: RoutedOperation? = nil
 
     var body: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 14) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(viewModel.statusMessage)
-                        .font(.callout)
-                        .lineLimit(1)
-
-                    Text("\(viewModel.selectedCount) photo sets selected, \(viewModel.selectedFileCount) files")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Button {
-                    viewModel.chooseDestinationDirectory()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "tray.and.arrow.down")
-                            .foregroundStyle(PhotomatorTheme.selectedBlue)
-                        if let dest = viewModel.destinationDirectory {
-                            Text("Destination: \(Text(dest.lastPathComponent).foregroundStyle(PhotomatorTheme.textPrimary))")
-                                .font(.callout)
-                                .foregroundStyle(PhotomatorTheme.textSecondary)
-                        } else {
-                            Text("Choose Destination...")
-                                .font(.callout)
-                                .foregroundStyle(PhotomatorTheme.textPrimary)
-                        }
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .flatSidebarButton(isHovered: isDestHovered)
-                }
-                .buttonStyle(.plain)
-                .onHover { isDestHovered = $0 }
-
-                if viewModel.isTransferring {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-            }
-
-            HStack(spacing: 10) {
+        VStack(spacing: Theme.Space.s10) {
+            HStack(spacing: Theme.Space.s16) {
+                statusBlock
+                Spacer(minLength: Theme.Space.s16)
                 ruleSummary
-
-                Spacer()
-
-                ForEach(RoutedOperation.allCases) { op in
-                    Button {
-                        viewModel.performRoutedOperation(op)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: op.systemImage)
-                                .font(.callout)
-                                .foregroundStyle(PhotomatorTheme.selectedBlue)
-                            Text(op.displayName)
-                                .font(.callout)
-                                .foregroundStyle(PhotomatorTheme.textPrimary)
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .flatSidebarButton(isHovered: hoveredOp == op)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!viewModel.canTransfer)
-                    .onHover { isHovered in
-                        hoveredOp = isHovered ? op : nil
-                    }
-                }
+                Spacer(minLength: Theme.Space.s16)
+                actionsBlock
             }
+            .padding(.horizontal, Theme.Space.s16)
+            .padding(.vertical, Theme.Space.s12)
 
             if let progress = viewModel.operationProgress {
-                VStack(spacing: 6) {
-                    if progress.totalBytes > 0 {
-                        ProgressView(value: Double(progress.completedBytes), total: Double(progress.totalBytes))
-                            .tint(.accentColor)
-                        
-                        HStack {
-                            Text("\(formatBytes(progress.completedBytes)) of \(formatBytes(progress.totalBytes))")
-                            Spacer()
-                            Text("\(progress.completed) / \(progress.total) files")
-                            Spacer()
-                            Text("\(formatBytes(Int64(progress.bytesPerSecond)))/s")
-                        }
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                    } else {
-                        ProgressView(value: Double(progress.completed), total: Double(max(1, progress.total)))
-                            .tint(.accentColor)
-                        Text("\(progress.completed) of \(progress.total) files")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.top, 4)
+                progressBlock(progress)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(PhotomatorTheme.footerBackground)
-        .overlay(
-            Rectangle()
-                .frame(height: 1)
-                .foregroundStyle(PhotomatorTheme.separator),
-            alignment: .top
-        )
+        .background(Theme.Color.footerBackground)
+        .overlay(Divider(), alignment: .top)
+    }
+
+    private var statusBlock: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s4) {
+            Text(viewModel.statusMessage)
+                .font(Theme.Font.callout)
+                .lineLimit(1)
+
+            HStack(spacing: Theme.Space.s6) {
+                if let focused = viewModel.currentFocusedPhotoSet {
+                    HStack(spacing: 4) {
+                        Image(systemName: "scope")
+                            .font(Theme.Font.caption2)
+                        Text("Focus: \(focused.baseName)")
+                            .font(Theme.Font.caption)
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(Theme.Color.accent)
+                }
+
+                if viewModel.selectedCount > 0 {
+                    Text("·")
+                        .foregroundStyle(Theme.Color.textSecondary)
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(Theme.Font.caption2)
+                            .foregroundStyle(Theme.Color.success)
+                        Text("^[\(viewModel.selectedCount) photo set](inflect: true) selected · \(viewModel.selectedFileCount) files")
+                            .font(Theme.Font.caption)
+                    }
+                    .foregroundStyle(Theme.Color.textSecondary)
+
+                    Button {
+                        viewModel.clearSelection()
+                    } label: {
+                        Text("Clear")
+                            .font(Theme.Font.caption2)
+                            .underline()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.Color.textSecondary)
+                }
+            }
+        }
+    }
+
+    private var actionsBlock: some View {
+        HStack(spacing: Theme.Space.s8) {
+            destinationButton
+            ForEach(RoutedOperation.allCases) { op in
+                actionButton(op)
+            }
+            if viewModel.isTransferring {
+                ProgressView().controlSize(.small)
+            }
+        }
+    }
+
+    private var destinationButton: some View {
+        Button {
+            viewModel.chooseDestinationDirectory()
+        } label: {
+            HStack(spacing: Theme.Space.s6) {
+                Image(systemName: "tray.and.arrow.down")
+                    .foregroundStyle(Theme.Color.accent)
+                if let dest = viewModel.destinationDirectory {
+                    Text("Destination: \(Text(dest.lastPathComponent).foregroundStyle(Theme.Color.textPrimary))")
+                        .font(Theme.Font.callout)
+                        .foregroundStyle(Theme.Color.textSecondary)
+                } else {
+                    Text("Choose Destination…")
+                        .font(Theme.Font.callout)
+                        .foregroundStyle(Theme.Color.textPrimary)
+                }
+            }
+            .padding(.horizontal, Theme.Space.s10)
+            .padding(.vertical, Theme.Space.s6)
+            .flatSidebarButton(isHovered: isDestHovered)
+        }
+        .buttonStyle(.plain)
+        .onHover { isDestHovered = $0 }
+    }
+
+    private func actionButton(_ op: RoutedOperation) -> some View {
+        Button {
+            viewModel.performRoutedOperation(op)
+        } label: {
+            HStack(spacing: Theme.Space.s6) {
+                Image(systemName: op.systemImage)
+                    .font(Theme.Font.callout)
+                    .foregroundStyle(Theme.Color.accent)
+                Text(op.displayName)
+                    .font(Theme.Font.callout)
+                    .foregroundStyle(Theme.Color.textPrimary)
+            }
+            .padding(.horizontal, Theme.Space.s10)
+            .padding(.vertical, Theme.Space.s6)
+            .flatSidebarButton(isHovered: hoveredOp == op)
+        }
+        .buttonStyle(.plain)
+        .disabled(!viewModel.canTransfer)
+        .onHover { isHovered in hoveredOp = isHovered ? op : nil }
     }
 
     @ViewBuilder
     private var ruleSummary: some View {
         if let rule = viewModel.ruleStore.selectedRule {
-            HStack(spacing: 6) {
+            HStack(spacing: Theme.Space.s6) {
                 Image(systemName: "folder.badge.gearshape")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.Color.textSecondary)
                 Text("Rule:")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Color.textSecondary)
                 Text(rule.name)
-                    .font(.caption.weight(.medium))
-                Text("•")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(Theme.Font.caption)
+                Divider().frame(height: 12)
                 Text(ExportPathRouter.describe(rule.components) {
                     viewModel.tagStore.categoryName(id: $0)
                 })
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Color.textSecondary)
                 .lineLimit(1)
+                .truncationMode(.middle)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(PhotomatorTheme.cellBackground, in: RoundedRectangle(cornerRadius: 6))
+            .padding(.horizontal, Theme.Space.s10)
+            .padding(.vertical, Theme.Space.s4)
+            .background(Theme.Color.cellBackground, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
         } else {
-            HStack(spacing: 6) {
+            HStack(spacing: Theme.Space.s6) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Theme.Color.warning)
                 Text("No routing rule selected — open the Routing Rules editor to create one.")
-                    .font(.caption)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Color.textSecondary)
             }
         }
+    }
+
+    private func progressBlock(_ progress: FileOperationProgress) -> some View {
+        VStack(spacing: Theme.Space.s6) {
+            if progress.totalBytes > 0 {
+                ProgressView(value: Double(progress.completedBytes), total: Double(progress.totalBytes))
+                    .tint(Theme.Color.accent)
+                HStack {
+                    Text("\(formatBytes(progress.completedBytes)) of \(formatBytes(progress.totalBytes))")
+                    Spacer()
+                    Text("\(progress.completed) / \(progress.total) files")
+                    Spacer()
+                    Text("\(formatBytes(Int64(progress.bytesPerSecond)))/s")
+                }
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(Theme.Color.textSecondary)
+            } else {
+                ProgressView(value: Double(progress.completed), total: Double(max(1, progress.total)))
+                    .tint(Theme.Color.accent)
+                Text("\(progress.completed) of \(progress.total) files")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(Theme.Color.textSecondary)
+            }
+        }
+        .padding(.horizontal, Theme.Space.s16)
+        .padding(.bottom, Theme.Space.s10)
     }
 
     private func formatBytes(_ bytes: Int64) -> String {

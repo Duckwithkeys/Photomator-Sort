@@ -12,11 +12,12 @@ final class SidecarWriteTests: XCTestCase {
             capture: MetadataSnapshot(
                 cameraModel: "X-T5", lensModel: "XF35mm",
                 captureDate: nil, aperture: 2.8, shutterSpeed: 0.004, iso: 400
-            )
+            ),
+            iptc: IPTCMetadata()
         )
 
         let service = XMPTaggingService()
-        try await service.writeExportSidecar(payload, besideDestinationFile: media)
+        try service.writeExportSidecar(payload, besideDestinationFile: media)
 
         let sidecar = dir.appendingPathComponent("IMG_0001.xmp")
         let xml = try String(contentsOf: sidecar, encoding: .utf8)
@@ -34,9 +35,10 @@ final class SidecarWriteTests: XCTestCase {
         let payload = SidecarPayload(
             tagNames: [],
             capture: MetadataSnapshot(cameraModel: "Cam \"Pro\"", lensModel: nil,
-                                      captureDate: nil, aperture: nil, shutterSpeed: nil, iso: nil)
+                                      captureDate: nil, aperture: nil, shutterSpeed: nil, iso: nil),
+            iptc: IPTCMetadata()
         )
-        try await XMPTaggingService().writeExportSidecar(payload, besideDestinationFile: media)
+        try XMPTaggingService().writeExportSidecar(payload, besideDestinationFile: media)
         let xml = try String(contentsOf: dir.appendingPathComponent("IMG_0002.xmp"), encoding: .utf8)
         XCTAssertTrue(xml.contains("tiff:Model=\"Cam &quot;Pro&quot;\""))
         XCTAssertFalse(xml.contains("\"Pro\""))
@@ -46,7 +48,6 @@ final class SidecarWriteTests: XCTestCase {
         let dir = try TempDir.make()
         defer { try? FileManager.default.removeItem(at: dir) }
         
-        let sourceMedia = dir.appendingPathComponent("IMG_0003.RAF")
         let sourceSidecar = dir.appendingPathComponent("IMG_0003.xmp")
         
         let initialXMP = """
@@ -75,11 +76,12 @@ final class SidecarWriteTests: XCTestCase {
             capture: MetadataSnapshot(
                 cameraModel: "X-T5", lensModel: "XF35mm",
                 captureDate: nil, aperture: 2.8, shutterSpeed: 0.004, iso: 400, rating: 5
-            )
+            ),
+            iptc: IPTCMetadata()
         )
         
         let service = XMPTaggingService()
-        try await service.writeExportSidecar(payload, besideDestinationFile: destMedia, mergingSourceSidecar: sourceSidecar)
+        try service.writeExportSidecar(payload, besideDestinationFile: destMedia, mergingSourceSidecar: sourceSidecar)
         
         let destSidecar = dir.appendingPathComponent("IMG_0003_dest.xmp")
         let mergedXML = try String(contentsOf: destSidecar, encoding: .utf8)

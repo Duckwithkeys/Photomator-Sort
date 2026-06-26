@@ -11,11 +11,18 @@ enum FilenameSanitizer {
         guard !trimmed.isEmpty else { return fallback }
 
         let illegal = CharacterSet(charactersIn: "/\\:?%*|\"<>")
-        let parts = trimmed.components(separatedBy: illegal)
-        return parts
-            .joined(separator: "-")
-            .replacingOccurrences(of: "  ", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        var result = ""
+        result.reserveCapacity(trimmed.count)
+        for scalar in trimmed.unicodeScalars {
+            result.unicodeScalars.append(illegal.contains(scalar) ? "-" : scalar)
+        }
+        // Collapse runs of spaces. Two passes max because each replacement
+        // can only reduce a 3+ space run by one; in practice filenames
+        // rarely have more than two consecutive spaces.
+        while result.contains("  ") {
+            result = result.replacingOccurrences(of: "  ", with: " ")
+        }
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

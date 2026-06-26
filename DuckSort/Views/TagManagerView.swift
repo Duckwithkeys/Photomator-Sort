@@ -18,24 +18,27 @@ struct TagManagerView: View {
     @State private var newCategoryName: String = ""
     @State private var newTagText: String = ""
     @State private var newTagCategoryID: UUID?
+    @State private var pendingContactImportURL: URL?
+    @State private var pendingContactNames: [String] = []  
 
     var body: some View {
-        VStack(spacing: 0) {            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 20) {
+        VStack(spacing: 0) {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: Theme.Space.s20) {
                     ForEach(tagStore.categories) { category in
                         categorySection(category)
                     }
 
                     addCategoryRow
                 }
-                .padding(20)
+                .padding(Theme.Space.s20)
             }
-            
+
             Divider()
-            
+
             HStack {
                 Button(action: importContacts) {
-                    Label("Import Contacts...", systemImage: "person.crop.circle.badge.plus")
+                    Label("Import Contacts…", systemImage: "person.crop.circle.badge.plus")
                 }
                 .buttonStyle(.bordered)
 
@@ -46,7 +49,7 @@ struct TagManagerView: View {
                     .keyboardShortcut(.cancelAction)
                     .hidden()
             }
-            .padding(12)
+            .padding(Theme.Space.s12)
         }
         .frame(minWidth: 640, minHeight: 520)
         .background(.ultraThinMaterial)
@@ -54,6 +57,22 @@ struct TagManagerView: View {
             if newTagCategoryID == nil {
                 newTagCategoryID = tagStore.categories.first?.id
             }
+        }
+        .confirmationDialog(
+            "Import \(pendingContactNames.count) contacts as tags?",
+            isPresented: Binding(
+                get: { pendingContactImportURL != nil },
+                set: { if !$0 { pendingContactImportURL = nil; pendingContactNames = [] } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Import") { performContactImport() }
+            Button("Cancel", role: .cancel) {
+                pendingContactImportURL = nil
+                pendingContactNames = []
+            }
+        } message: {
+            Text("New tags will be added under the People category. Existing tags with the same name are kept.")
         }
     }
 
@@ -100,57 +119,93 @@ struct TagManagerView: View {
 
     @ViewBuilder
     private func tagRow(_ tag: CustomTag) -> some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(tag.color)
-                .frame(width: 12, height: 12)
+        VStack(alignment: .leading, spacing: Theme.Space.s4) {
+            HStack(spacing: Theme.Space.s10) {
+                Circle()
+                    .fill(tag.color)
+                    .frame(width: 12, height: 12)
 
-            TextField("Tag name", text: Binding(
-                get: { tag.name },
-                set: { newName in
-                    var updated = tag
-                    updated.name = newName
-                    tagStore.updateTag(updated)
-                }
-            ))
-            .textFieldStyle(.roundedBorder)
-            .frame(maxWidth: 220)
-
-            HStack(spacing: 4) {
-                Text("Hotkey")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                ShortcutRecorderView(hotkey: Binding(
-                    get: { tag.hotkey },
-                    set: { newValue in
+                TextField("Tag name", text: Binding(
+                    get: { tag.name },
+                    set: { newName in
                         var updated = tag
-                        updated.hotkey = newValue
+                        updated.name = newName
                         tagStore.updateTag(updated)
                     }
                 ))
-            }
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 220)
 
-            ColorPicker("", selection: Binding(
-                get: { tag.color },
-                set: { newColor in
-                    var updated = tag
-                    updated.colorHex = newColor.toHex() ?? tag.colorHex
-                    tagStore.updateTag(updated)
+                HStack(spacing: Theme.Space.s4) {
+                    Text("Hotkey")
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Color.textSecondary)
+                    ShortcutRecorderView(
+                        hotkey: Binding(
+                            get: { tag.hotkey },
+                            set: { newValue in
+                                var updated = tag
+                                updated.hotkey = newValue
+                                tagStore.updateTag(updated)
+                            }
+                        ),
+                        validationMessage: { proposed in tagConflict(for: tag, hotkey: proposed) }
+                    )
                 }
-            ), supportsOpacity: false)
-            .labelsHidden()
-            .frame(width: 36)
 
-            Button(role: .destructive) {
-                tagStore.deleteTag(id: tag.id)
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
-                    .padding(4)
+                ColorPicker("", selection: Binding(
+                    get: { tag.color },
+                    set: { newColor in
+                        var updated = tag
+                        updated.colorHex = newColor.toHex() ?? tag.colorHex
+                        tagStore.updateTag(updated)
+                    }
+                ), supportsOpacity: false)
+                .labelsHidden()
+                .frame(width: 36)
+
+                Button(role: .destructive) {
+                    tagStore.deleteTag(id: tag.id)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(Theme.Color.textSecondary)
+                        .padding(Theme.Space.s4)
+                }
+                .buttonStyle(.plain)
+                .help("Delete tag")
             }
-            .buttonStyle(.plain)
-            .help("Delete tag")
+
+            if let conflict = tagConflict(for: tag) {
+                HStack(spacing: Theme.Space.s6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Theme.Color.warning)
+                    Text(conflict)
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Color.warning)
+                }
+                .padding(.leading, 22)
+            }
         }
+    }
+
+    /// Detect hotkey collisions with built-in culling shortcuts and other tags.
+    /// Returns nil if the hotkey is empty or has no conflict.
+    private func tagConflict(for tag: CustomTag) -> String? {
+        guard let hotkey = tag.hotkey, !hotkey.isEmpty else { return nil }
+        return tagConflict(for: tag, hotkey: hotkey)
+    }
+
+    private func tagConflict(for tag: CustomTag, hotkey: String) -> String? {
+        if let reason = TagHotkeyRules.reservedReason(for: hotkey) {
+            return "Used by \(reason)."
+        }
+        let duplicates = tagStore.tags.filter { other in
+            other.id != tag.id && other.hotkey == hotkey
+        }
+        if let other = duplicates.first {
+            return "Already used by tag “\(other.name)”."
+        }
+        return nil
     }
 
     @ViewBuilder
@@ -210,35 +265,46 @@ struct TagManagerView: View {
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.title = "Import Contacts as Tags"
-        panel.prompt = "Import"
-        
-        if panel.runModal() == .OK, let url = panel.url {
-            do {
-                let content = try String(contentsOf: url, encoding: .utf8)
-                let names = parseVCardNames(content)
-                guard !names.isEmpty else { return }
-                
-                let categoryName = "People"
-                let category: TagCategory
-                if let existing = tagStore.categories.first(where: { $0.name.lowercased() == categoryName.lowercased() }) {
-                    category = existing
-                } else {
-                    category = tagStore.addCategory(name: categoryName)
-                }
-                
-                for name in names {
-                    let existingTags = tagStore.tags(in: category.id)
-                    if !existingTags.contains(where: { $0.name.lowercased() == name.lowercased() }) {
-                        _ = tagStore.addTag(name: name, categoryID: category.id)
-                    }
-                }
-                
-                if newTagCategoryID == nil {
-                    newTagCategoryID = category.id
-                }
-            } catch {
-                print("Failed to import contacts: \(error)")
+        panel.prompt = "Inspect"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let content = try String(contentsOf: url, encoding: .utf8)
+            let names = parseVCardNames(content)
+            guard !names.isEmpty else { return }
+            pendingContactImportURL = url
+            pendingContactNames = names
+        } catch {
+            print("Failed to read vCard: \(error)")
+        }
+    }
+
+    private func performContactImport() {
+        defer {
+            pendingContactImportURL = nil
+            pendingContactNames = []
+        }
+        guard !pendingContactNames.isEmpty else { return }
+
+        let categoryName = "People"
+        let category: TagCategory
+        if let existing = tagStore.categories.first(where: {
+            $0.name.lowercased() == categoryName.lowercased()
+        }) {
+            category = existing
+        } else {
+            category = tagStore.addCategory(name: categoryName)
+        }
+
+        for name in pendingContactNames {
+            let existingTags = tagStore.tags(in: category.id)
+            if !existingTags.contains(where: { $0.name.lowercased() == name.lowercased() }) {
+                _ = tagStore.addTag(name: name, categoryID: category.id)
             }
+        }
+
+        if newTagCategoryID == nil {
+            newTagCategoryID = category.id
         }
     }
     

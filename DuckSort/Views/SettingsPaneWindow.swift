@@ -3,7 +3,7 @@
 //  DuckSort
 //
 //  Unified Safari-style preferences window. Hosts Rules, Tags, and Shortcuts
-//  panes behind a segmented top toolbar. Fixed 720×480, non-resizable.
+//  panes behind a segmented top toolbar. Resizable.
 //
 
 import SwiftUI
@@ -14,12 +14,14 @@ import AppKit
 enum SettingsTab: String, CaseIterable {
     case rules      = "Rules"
     case tags       = "Tags"
+    case copyright  = "Copyright"
     case shortcuts  = "Shortcuts"
 
     var systemImage: String {
         switch self {
         case .rules:     return "folder.badge.gearshape"
         case .tags:      return "tag"
+        case .copyright: return "c.circle"
         case .shortcuts: return "keyboard.badge.ellipsis"
         }
     }
@@ -36,15 +38,12 @@ struct SettingsPaneView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // ── Top Toolbar ──────────────────────────────────────────────────
             SettingsToolbar(selectedTab: $selectedTab)
 
-            // ── Divider ──────────────────────────────────────────────────────
             Rectangle()
-                .fill(dsColor("#323232"))
-                .frame(height: 1)
+                .fill(Theme.Color.surfaceDivider)
+                .frame(height: Theme.Stroke.hairline)
 
-            // ── Body ─────────────────────────────────────────────────────────
             Group {
                 switch selectedTab {
                 case .rules:
@@ -57,6 +56,8 @@ struct SettingsPaneView: View {
                         viewModel: viewModel,
                         tagStore: viewModel.tagStore
                     )
+                case .copyright:
+                    SettingsIPTCPaneView(preferences: UserPreferences.shared)
                 case .shortcuts:
                     SettingsShortcutsPaneView(viewModel: viewModel)
                 }
@@ -65,19 +66,16 @@ struct SettingsPaneView: View {
 
             if selectedTab == .tags {
                 Rectangle()
-                    .fill(dsColor("#323232"))
-                    .frame(height: 1)
-                SettingsFooter(
-                    tagStore: viewModel.tagStore
-                )
+                    .fill(Theme.Color.surfaceDivider)
+                    .frame(height: Theme.Stroke.hairline)
+                SettingsFooter(tagStore: viewModel.tagStore)
             }
         }
-.frame(minWidth: 720, minHeight: 480)
-        .background(dsColor( "#1E1E1E"))
+        .frame(minWidth: 820, idealWidth: 960, minHeight: 560, idealHeight: 720)
+        .background(Theme.Color.surfaceBase)
         .onAppear { selectedTab = initialTab }
     }
 }
-
 
 // MARK: - Toolbar
 
@@ -96,10 +94,10 @@ private struct SettingsToolbar: View {
             }
             Spacer()
         }
-        .padding(.top, 6)
-        .padding(.bottom, 10)
+        .padding(.top, Theme.Space.s6)
+        .padding(.bottom, Theme.Space.s10)
         .frame(maxWidth: .infinity)
-        .background(dsColor("#1E1E1E"))
+        .background(Theme.Color.surfaceBase)
     }
 }
 
@@ -110,22 +108,22 @@ private struct SettingsTabButton: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 3) {
+            VStack(spacing: Theme.Space.s4) {
                 Image(systemName: tab.systemImage)
                     .font(.system(size: 22, weight: .light))
                     .frame(width: 24, height: 24)
                 Text(tab.rawValue)
-                    .font(.system(size: 11))
+                    .font(Theme.Font.subheadline)
             }
-            .foregroundStyle(isSelected ? Color.white : dsColor("#8A8A8E"))
-            .padding(.horizontal, 18)
-            .padding(.vertical, 4)
+            .foregroundStyle(isSelected ? Theme.Color.textInverse : Theme.Color.textTertiary)
+            .padding(.horizontal, Theme.Space.s20)
+            .padding(.vertical, Theme.Space.s4)
             .background(
                 isSelected
-                    ? RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.10))
-                    : RoundedRectangle(cornerRadius: 8).fill(Color.clear)
+                    ? RoundedRectangle(cornerRadius: Theme.Radius.l).fill(Theme.Color.overlaySoft)
+                    : RoundedRectangle(cornerRadius: Theme.Radius.l).fill(Color.clear)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 8))
+            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.l))
         }
         .buttonStyle(.plain)
         .animation(.easeInOut(duration: 0.18), value: isSelected)
@@ -136,20 +134,52 @@ private struct SettingsTabButton: View {
 
 private struct SettingsFooter: View {
     @ObservedObject var tagStore: TagStore
+    @State private var showContactConfirm = false
+    @State private var pendingContactCount = 0
 
     var body: some View {
-        Button(action: importContacts) {
+        Button(action: { showContactConfirm = true }) {
             Text("Import Contacts…")
-                .font(.system(size: 13))
+                .font(Theme.Font.body)
         }
-        .buttonStyle(OutlineButtonStyle())
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .buttonStyle(.bordered)
+        .padding(.horizontal, Theme.Space.s16)
+        .padding(.vertical, Theme.Space.s10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(dsColor("#1E1E1E"))
+        .background(Theme.Color.surfaceBase)
+        .confirmationDialog(
+            "Import \(pendingContactCount) contacts as tags?",
+            isPresented: $showContactConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Import") { performContactImport() }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("New tags will be added under the People category. Existing tags with the same name are kept.")
+        }
     }
 
-    private func importContacts() {
+    private func showContactPicker() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.vCard]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.title = "Import Contacts as Tags"
+        panel.prompt = "Inspect"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let content = try String(contentsOf: url, encoding: .utf8)
+            pendingContactCount = parseVCardNames(content).count
+            guard pendingContactCount > 0 else { return }
+            showContactConfirm = true
+        } catch {
+            print("Failed to read vCard: \(error)")
+        }
+    }
+
+    private func performContactImport() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.vCard]
         panel.allowsMultipleSelection = false
@@ -158,31 +188,30 @@ private struct SettingsFooter: View {
         panel.title = "Import Contacts as Tags"
         panel.prompt = "Import"
 
-        if panel.runModal() == .OK, let url = panel.url {
-            do {
-                let content = try String(contentsOf: url, encoding: .utf8)
-                let names = parseVCardNames(content)
-                guard !names.isEmpty else { return }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let content = try String(contentsOf: url, encoding: .utf8)
+            let names = parseVCardNames(content)
+            guard !names.isEmpty else { return }
 
-                let categoryName = "People"
-                let category: TagCategory
-                if let existing = tagStore.categories.first(where: {
-                    $0.name.lowercased() == categoryName.lowercased()
-                }) {
-                    category = existing
-                } else {
-                    category = tagStore.addCategory(name: categoryName)
-                }
-
-                for name in names {
-                    let existingTags = tagStore.tags(in: category.id)
-                    if !existingTags.contains(where: { $0.name.lowercased() == name.lowercased() }) {
-                        _ = tagStore.addTag(name: name, categoryID: category.id)
-                    }
-                }
-            } catch {
-                print("Failed to import contacts: \(error)")
+            let categoryName = "People"
+            let category: TagCategory
+            if let existing = tagStore.categories.first(where: {
+                $0.name.lowercased() == categoryName.lowercased()
+            }) {
+                category = existing
+            } else {
+                category = tagStore.addCategory(name: categoryName)
             }
+
+            for name in names {
+                let existingTags = tagStore.tags(in: category.id)
+                if !existingTags.contains(where: { $0.name.lowercased() == name.lowercased() }) {
+                    _ = tagStore.addTag(name: name, categoryID: category.id)
+                }
+            }
+        } catch {
+            print("Failed to import contacts: \(error)")
         }
     }
 
@@ -207,45 +236,11 @@ private struct SettingsFooter: View {
 }
 
 // MARK: - Button Styles
-
-struct AccentCapsuleButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 6)
-            .background(
-                Capsule().fill(
-                    configuration.isPressed
-                        ? dsColor("#0060D0")
-                        : dsColor("#0A84FF")
-                )
-            )
-            .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
-    }
-}
-
-struct OutlineButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 13))
-            .foregroundStyle(dsColor("#8A8A8E"))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(dsColor("#3C3C3E"), lineWidth: 1)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(configuration.isPressed
-                                  ? Color.white.opacity(0.06)
-                                  : Color.clear)
-                    )
-            )
-            .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
-    }
-}
+//
+// Replaced by SwiftUI's built-in `.bordered` and `.borderedProminent` styles
+// wherever the previous custom styles were used. If a one-off capsule button
+// is needed elsewhere, prefer `.buttonStyle(.borderedProminent)` and let
+// SwiftUI handle keyboard focus + accent color.
 
 // MARK: - Shared Settings Layout: Sidebar + Right Panel
 
@@ -255,27 +250,17 @@ struct SettingsSplitLayout<Sidebar: View, Detail: View>: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // Left sidebar — fixed 200px, deep slate
             sidebar()
                 .frame(width: 200)
-                .background(Color(hex: "#161616"))
+                .background(Theme.Color.surfaceSidebar)
 
-            // 1px separator
             Rectangle()
-                .fill(dsColor("#323232"))
-                .frame(width: 1)
+                .fill(Theme.Color.surfaceDivider)
+                .frame(width: Theme.Stroke.hairline)
 
-            // Right detail panel
             detail()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(dsColor("#1E1E1E"))
+                .background(Theme.Color.surfaceBase)
         }
     }
-}
-
-// MARK: - Private hex color helper (avoids redeclaring Color.init(hex:) from CustomTag.swift)
-// dsColor() is a file-private shorthand used throughout the Settings UI files.
-
-func dsColor(_ hex: String) -> Color {
-    Color(hex: hex) ?? .black
 }

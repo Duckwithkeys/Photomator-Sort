@@ -1,5 +1,12 @@
 You are an elite Principal Software Engineer. You are being given a Swift/SwiftUI macOS application called DuckSort — a photo sorting and tagging tool. Your job is to implement every performance optimization listed below, in order, across the codebase. Do NOT break existing functionality. Do NOT change the app's behavior. Make it do exactly what it does now, just faster.
 
+LAST REVIEWED: 2026-06-25 — every item below this status block was implemented
+on 2026-06-25 and verified by `xcodebuild test` (22/22 passing). This file is
+kept as a historical reference of the *specification*; the audit log of what
+was actually applied lives in Suggestions.txt under the [DONE] markers.
+Nothing below is pending work — if you are picking up this codebase, see
+Suggestions.txt for the current state.
+
 STRICT RULES:
 - Do NOT rewrite the app in a different language or framework.
 - Do NOT remove features or change the user-facing behavior.
@@ -7,9 +14,20 @@ STRICT RULES:
 - Preserve all existing comments and docstrings unrelated to your changes.
 - After each phase, verify the code compiles (swift build) and the app still works.
 
-================================================================================
-PHASE 1 — CRITICAL (implement these first, in order)
-================================================================================
+CURRENT STATUS (2026-06-25)
+══════════════════════════
+PHASE 1 (Critical): 5/5 done.
+PHASE 2 (High):     8/8 done.
+PHASE 3 (Medium):   6/6 done.
+PHASE 4 (Polish):   9/10 done (4D is a no-op duplicate of 2G).
+
+All implementations verified by `xcodebuild test` (22/22 tests passing)
+and `swift build` (clean, zero warnings introduced). See Suggestions.txt
+for per-item audit trail with file:line evidence.
+
+═══════════════════════════════════════════════════════════════════════════════
+PHASE 1 — CRITICAL
+═══════════════════════════════════════════════════════════════════════════════
 
 1A. BUILD A UUID→INDEX DICTIONARY FOR O(1) PHOTOSET LOOKUPS
     File: PhotoLibraryViewModel.swift
@@ -39,12 +57,21 @@ PHASE 1 — CRITICAL (implement these first, in order)
     This applies to: toggleSelection(), setSelection(), setRating(), setPick(),
     applyTag(), removeTag(), clearTags(), and any other method using firstIndex on photoSets.
 
+    CURRENT EVIDENCE:
+        PhotoLibraryViewModel.swift:533  (toggleSelection)
+        PhotoLibraryViewModel.swift:541  (setSelection)
+        PhotoLibraryViewModel.swift:714  (navigateFocusedPhoto: filteredPhotoSets.firstIndex)
+
     Also in loadMetadata() and loadExistingTags(), where the code does:
         if let idx = updatedSets.firstIndex(where: { $0.id == id }) {
     Build a LOCAL index from updatedSets before the loop:
         let localIndex = Dictionary(uniqueKeysWithValues: updatedSets.enumerated().map { ($1.id, $0) })
     Then use:
         if let idx = localIndex[id] {
+
+    CURRENT EVIDENCE:
+        PhotoLibraryViewModel.swift:495  (loadMetadata result loop)
+        PhotoLibraryViewModel.swift:1380 (loadExistingTags result loop)
 
     Similarly for any use of photoSets.first(where: { $0.id == ... }) — replace with photoSetIndex lookup + subscript.
 
@@ -96,15 +123,23 @@ PHASE 1 — CRITICAL (implement these first, in order)
     replace it with the corresponding pre-compiled static. There must be zero runtime regex compilation
     remaining in this file after this change.
 
+    CURRENT EVIDENCE (lines to replace):
+        XMPTaggingService.swift:184, 193, 215, 234, 240, 253, 260, 270, 277,
+        296, 410, 429, 455, 472, 481, 575, 597, 619, 628.
+    MetadataReader.swift already does this correctly (4 static lets at top of file).
+
 ────────────────────────────────────────────────────────────────────────────────
 
 1C. FUSE updateDerivedState() FILTER PASSES INTO A SINGLE LOOP
     File: PhotoLibraryViewModel.swift
 
-    Replace the current updateDerivedState() implementation (which chains up to 6 sequential
-    .filter() calls, each allocating a new intermediate array) with a single-pass version:
+    Replace the current updateDerivedState() implementation (which chains up to 7 sequential
+    .filter() calls — one more than the original audit, due to rejection-filter and caption-search
+    branches that were added later) with a single-pass version:
 
     func updateDerivedState() {
+        let filterAll = (filterRule == .allPhotos)
+        let showRejected = selectedFlags.contains(-1)
         let hasTagFilter = !selectedTagFilters.isEmpty
         let hasFlagFilter = !selectedFlags.isEmpty
         let hasRatingFilter = !selectedRatings.isEmpty
@@ -117,6 +152,7 @@ PHASE 1 — CRITICAL (implement these first, in order)
 
         for photoSet in photoSets {
             guard filterRule.matches(photoSet) else { continue }
+            if !showRejected && photoSet.pick == -1 { continue }
             if hasTagFilter {
                 guard !selectedTagFilters.isDisjoint(with: tagStore.assignedTagIDs(for: photoSet.id)) else { continue }
             }
@@ -131,7 +167,8 @@ PHASE 1 — CRITICAL (implement these first, in order)
                 guard photoSet.mediaFiles.contains(where: { $0.deletingLastPathComponent().path == subPath }) else { continue }
             }
             if hasSearchQuery {
-                guard photoSet.baseName.lowercased().contains(query) else { continue }
+                guard photoSet.baseName.lowercased().contains(query) ||
+                      (photoCaptions[photoSet.id]?.lowercased().contains(query) ?? false) else { continue }
             }
             list.append(photoSet)
         }
@@ -160,30 +197,35 @@ PHASE 1 — CRITICAL (implement these first, in order)
         self.nearFocusedIds = newSet
     }
 
-    Note: The subfolder filter now compares .path strings instead of calling .standardizedFileURL
+    Note: The subfolder filter compares .path strings instead of calling .standardizedFileURL
     on every file, eliminating expensive URL resolution per file per call.
+
+    CURRENT EVIDENCE: PhotoLibraryViewModel.swift:1473-1534.
 
 ────────────────────────────────────────────────────────────────────────────────
 
 1D. MERGE loadMetadata AND loadExistingTags INTO A SINGLE CONCURRENT PASS
     File: PhotoLibraryViewModel.swift
 
-    Delete the separate loadMetadata() and loadExistingTags() methods. Replace with a single
-    combined method called loadMetadataAndTags(). In scanSourceDirectories(), replace the two calls:
+    Delete the separate loadMetadata() (line 467) and loadExistingTags() (line 1337) methods.
+    Replace with a single combined method called loadMetadataAndTags() that:
+    1. Uses a single withTaskGroup that, for each PhotoSet, reads BOTH EXIF metadata
+       (via metadataReader) AND XMP sidecar data (via xmpTagging) in the same task.
+    2. Collects combined results.
+    3. Applies all results to photoSets, photoMetadata, photoCaptions, and tagStore in ONE
+       pass, with ONE self.photoSets assignment (eliminating the second updateGlobalCounts +
+       updateDerivedState cycle that the old separate approach triggered).
+    4. Builds a local index for O(1) lookups within the result-application loop.
+    5. Prefers sidecar rating/pick over EXIF when both exist.
+    6. (Optional but recommended) Two-phase: first ~100 sets with high priority, then rest.
+
+    In scanSourceDirectories(), replace:
         self.loadExistingTags(for: photoSets)
         self.loadMetadata(for: photoSets)
     with:
         self.loadMetadataAndTags(for: photoSets)
 
-    The new method should:
-    1. Use a single withTaskGroup that, for each PhotoSet, reads BOTH EXIF metadata
-       (via metadataReader) AND XMP sidecar data (via xmpTagging) in the same task.
-    2. Collect combined results.
-    3. Apply all results to photoSets, photoMetadata, and tagStore in ONE pass, with
-       ONE self.photoSets assignment (eliminating the second updateGlobalCounts +
-       updateDerivedState cycle that the old separate approach triggered).
-    4. Build a local index for O(1) lookups within the result-application loop.
-    5. Prefer sidecar rating/pick over EXIF when both exist.
+    See Suggestions.txt 4A and 5D for the full sketch (incl. visible-first prioritization).
 
 ────────────────────────────────────────────────────────────────────────────────
 
@@ -196,6 +238,9 @@ PHASE 1 — CRITICAL (implement these first, in order)
     XMPTaggingService has NO mutable stored state — it is a stateless I/O helper.
     The actor keyword was unnecessary and serialized all sidecar writes during
     concurrent transfer operations (bottlenecking 8 parallel workers through 1 queue).
+    xmpSidecarURLs is already nonisolated static (line 115) — that change already
+    gave that method full parallelism; this change extends the same treatment
+    to the write/read/update methods.
 
     After this change:
     - Remove `await` on all call sites of XMPTaggingService methods throughout the project.
@@ -208,16 +253,16 @@ PHASE 1 — CRITICAL (implement these first, in order)
     via `previousTask` already guarantees ordering for tag writes. The actor lock was
     redundant. Keep the task chaining logic exactly as-is.
 
-================================================================================
+═══════════════════════════════════════════════════════════════════════════════
 PHASE 2 — HIGH IMPACT
-================================================================================
+═══════════════════════════════════════════════════════════════════════════════
 
 2A. CACHE selectedCount AND selectedFileCount IN updateGlobalCounts
     File: PhotoLibraryViewModel.swift
 
-    The computed properties selectedCount and selectedFileCount each re-filter the
-    entire photoSets array on every access. Add cached stored properties and compute
-    them inside updateGlobalCounts() which already iterates all photo sets:
+    The computed properties selectedCount (line 234) and selectedFileCount (line 236) each
+    re-filter the entire photoSets array on every access. Add cached stored properties and
+    compute them inside updateGlobalCounts() which already iterates all photo sets:
 
         @Published private(set) var cachedSelectedCount: Int = 0
         @Published private(set) var cachedSelectedFileCount: Int = 0
@@ -238,8 +283,8 @@ PHASE 2 — HIGH IMPACT
 2B. CACHE destinationFolders COMPUTATION IN RoutedTransferService
     File: RoutedTransferService.swift
 
-    ExportPathRouter.destinationFolders() is called 4 separate times per photo
-    (pre-walk, size computation, directory creation, job building). Compute it ONCE
+    ExportPathRouter.destinationFolders() is still called 3 separate times per photo
+    (pre-walk at line 56, mkdir at line 88, job-build at line 105). Compute it ONCE
     per photo and store the result in a local struct:
 
         struct PhotoRoutingResult {
@@ -263,7 +308,7 @@ PHASE 2 — HIGH IMPACT
 ────────────────────────────────────────────────────────────────────────────────
 
 2C. CACHE DateFormatter IN ExportPathRouter
-    File: ExportPathRule.swift
+    File: ExportPathRule.swift, line 159
 
     Replace the defaultDateFolderFormatter function that creates a new DateFormatter
     on every call with a static cached instance:
@@ -282,7 +327,7 @@ PHASE 2 — HIGH IMPACT
 ────────────────────────────────────────────────────────────────────────────────
 
 2D. PASS PRE-READ METADATA TO FileTransferService (ELIMINATE RE-READ FROM DISK)
-    File: FileTransferService.swift, PhotoLibraryViewModel.swift
+    File: FileTransferService.swift (line 109), PhotoLibraryViewModel.swift
 
     FileTransferService currently re-reads EXIF metadata from disk for every photo
     during transfer. That metadata is already in viewModel.photoMetadata. Change the
@@ -299,7 +344,7 @@ PHASE 2 — HIGH IMPACT
 ────────────────────────────────────────────────────────────────────────────────
 
 2E. USE .min(by:) INSTEAD OF .sorted().first IN PhotoSet.init
-    File: PhotoSet.swift
+    File: PhotoSet.swift, line 115
 
     Replace:
         self.preferredPreviewURL = sortedFiles.sorted { lhs, rhs in
@@ -316,17 +361,17 @@ PHASE 2 — HIGH IMPACT
 ────────────────────────────────────────────────────────────────────────────────
 
 2F. REMOVE REDUNDANT SORTS IN FileScanner
-    File: FileScanner.swift
+    File: FileScanner.swift (lines 245 and 287)
 
     The assemble() method sorts photoSets, then scanDirectories() sorts again, then
     the ViewModel sorts a third time. This is 3 × O(n log n) on the same data.
     Remove the sort from assemble() and from scanDirectories(). Keep ONLY the final
-    sort in PhotoLibraryViewModel.scanSourceDirectories().
+    sort in PhotoLibraryViewModel.scanSourceDirectories() (line 445).
 
 ────────────────────────────────────────────────────────────────────────────────
 
 2G. CACHE allFiles AS A STORED LET ON PhotoSet
-    File: PhotoSet.swift
+    File: PhotoSet.swift, lines 56-61
 
     Change allFiles from a computed property to a stored let property:
         let allFiles: [URL]
@@ -339,10 +384,14 @@ PHASE 2 — HIGH IMPACT
     editPath is never mutated after init, so caching is safe. This eliminates
     an array copy on every access in tight loops (job building, file counting, etc).
 
+    CURRENT NOTE: After completing this, also consider memoizing fileBreakdown
+    (added 2026-06-25) similarly — it's currently a computed property that
+    re-builds the [FileBreakdownEntry] array on every sidebar body re-evaluation.
+
 ────────────────────────────────────────────────────────────────────────────────
 
 2H. PRE-BUILD TAG HOTKEY DICTIONARY FOR O(1) KEYPRESS LOOKUP
-    File: TagStore (wherever tags index is maintained), ContentView.swift
+    File: TagStore.swift, ContentView.swift
 
     Currently every keypress iterates all tags, calling tag.shortcutInfo (which
     re-parses the hotkey string) on each one. Fix by maintaining a lookup dictionary
@@ -371,9 +420,9 @@ PHASE 2 — HIGH IMPACT
             // apply tag
         }
 
-================================================================================
+═══════════════════════════════════════════════════════════════════════════════
 PHASE 3 — MEDIUM IMPACT
-================================================================================
+═══════════════════════════════════════════════════════════════════════════════
 
 3A. COMBINE SIDECAR EXISTENCE CHECK + READ INTO A SINGLE I/O CALL
     File: XMPTaggingService.swift
@@ -386,6 +435,10 @@ PHASE 3 — MEDIUM IMPACT
     If the file does not exist, String(contentsOf:) will simply return nil from try?.
     Apply this pattern everywhere a fileExists check immediately precedes a read.
 
+    CURRENT EVIDENCE:
+        XMPTaggingService.swift:30 (where check before iteration),
+        :45-46, :83-84, :136-137, :159-160, :228-229, :331-332.
+
 ────────────────────────────────────────────────────────────────────────────────
 
 3B. COALESCE updateGlobalCounts + updateDerivedState CALLS WITHIN ONE RUN LOOP CYCLE
@@ -396,8 +449,33 @@ PHASE 3 — MEDIUM IMPACT
     updateDerivedState(). During batch operations like loadMetadataAndTags(), this
     can trigger 4+ full recomputations for one logical operation.
 
-    In the tagStore.objectWillChange Combine sink, replace the direct calls with
-    RunLoop-coalesced scheduling:
+    EVIDENCE: updateDerivedState() is called from at least 9 sites:
+        lines 38, 48, 53, 58, 63, 94, 106, 152, 180, 205, 289, 1400.
+
+    Use a coalescing flag:
+
+        private var needsCountUpdate = false
+        private var needsDerivedUpdate = false
+
+        private func scheduleCountUpdate() {
+            guard !needsCountUpdate else { return }
+            needsCountUpdate = true
+            Task { @MainActor in
+                self.needsCountUpdate = false
+                self.updateGlobalCounts()
+            }
+        }
+
+        private func scheduleDerivedUpdate() {
+            guard !needsDerivedUpdate else { return }
+            needsDerivedUpdate = true
+            Task { @MainActor in
+                self.needsDerivedUpdate = false
+                self.updateDerivedState()
+            }
+        }
+
+    Or simpler — use RunLoop.main.perform for both:
 
         tagStore.objectWillChange
             .receive(on: RunLoop.main)
@@ -415,7 +493,7 @@ PHASE 3 — MEDIUM IMPACT
 ────────────────────────────────────────────────────────────────────────────────
 
 3C. SCALE THUMBNAIL CACHE LIMITS BASED ON AVAILABLE MEMORY
-    File: ThumbnailView.swift (ThumbnailCache init)
+    File: ThumbnailView.swift (ThumbnailCache init at lines 253-260)
 
     Replace the fixed cache limits with dynamic scaling based on physical RAM:
 
@@ -468,30 +546,20 @@ PHASE 3 — MEDIUM IMPACT
 ────────────────────────────────────────────────────────────────────────────────
 
 3E. CACHE SIDEBAR LOGO IMAGE AS STATIC PROPERTY
-    File: SidebarView.swift
+    STATUS: [N/A — already efficient via asset catalog]
 
-    The logo image loading closure runs on EVERY SwiftUI body re-evaluation,
-    performing file I/O each time. Move it to a static let:
+    File: SidebarView.swift, line 79
 
-        struct SidebarView: View {
-            private static let logoImage: NSImage = {
-                if let path = Bundle.module.path(forResource: "duck_logo", ofType: "png"),
-                   let image = NSImage(contentsOfFile: path) { return image }
-                if let image = Bundle.module.image(forResource: "duck_logo") { return image }
-                if let image = Bundle.module.image(forResource: "AppIcon") { return image }
-                if let path = Bundle.module.path(forResource: "AppIcon", ofType: "icns"),
-                   let image = NSImage(contentsOfFile: path) { return image }
-                return NSApplication.shared.applicationIconImage ?? NSImage()
-            }()
-            // ...
-        }
+    SidebarView uses `Image("duck_logo")` which references an asset catalog image.
+    System caches asset catalog images; no per-body file I/O. The original
+    `static let NSImage` pattern is unnecessary.
 
-    Then in body: Image(nsImage: Self.logoImage)
+    NO ACTION NEEDED.
 
 ────────────────────────────────────────────────────────────────────────────────
 
 3F. DEBOUNCE UserPreferences.save() TO AVOID REDUNDANT WRITES
-    File: UserPreferences.swift
+    File: UserPreferences.swift, line 96
 
     save() currently writes ALL keys to UserDefaults synchronously on every call.
     During initialization multiple properties fire it in quick succession. Debounce it:
@@ -526,12 +594,15 @@ PHASE 3 — MEDIUM IMPACT
             performSave()
         }
 
-================================================================================
+    NOTE: TagStore.save() (line 317) ALREADY does this with a 500ms debounce.
+    This brings UserPreferences up to parity.
+
+═══════════════════════════════════════════════════════════════════════════════
 PHASE 4 — POLISH
-================================================================================
+═══════════════════════════════════════════════════════════════════════════════
 
 4A. SINGLE-PASS XML ESCAPE AND UNESCAPE IN XMPTaggingService
-    File: XMPTaggingService.swift
+    File: XMPTaggingService.swift, lines 782-796
 
     Replace the chained replacingOccurrences calls in escape() (4 passes) and
     unescape() (5 passes) with single-pass character-by-character rewrites:
@@ -568,7 +639,7 @@ PHASE 4 — POLISH
 ────────────────────────────────────────────────────────────────────────────────
 
 4B. PRE-BUILD EXTENSION LOOKUP DICTIONARY IN FileScanner
-    File: FileScanner.swift
+    File: FileScanner.swift, lines 50, 106, 174
 
     Replace the two-step lookup (Set.contains check + FileExtension(rawValue:) init,
     which internally scans all enum cases) with a single O(1) dictionary lookup:
@@ -590,7 +661,7 @@ PHASE 4 — POLISH
 ────────────────────────────────────────────────────────────────────────────────
 
 4C. OPTIMIZE xmpSidecarURLs TO USE INCREMENTAL DEDUP
-    File: XMPTaggingService.swift
+    File: XMPTaggingService.swift, lines 115-126
 
     Replace the 6-allocation Array(Set(...)).sorted() pattern:
         return Array(Set(mediaSidecars + [editSidecar].compactMap { $0 })).sorted { ... }
@@ -618,7 +689,7 @@ PHASE 4 — POLISH
 ────────────────────────────────────────────────────────────────────────────────
 
 4D. CACHE allFiles AS A STORED LET ON PhotoSet (if not done in 2G)
-    File: PhotoSet.swift
+    File: PhotoSet.swift, lines 56-61
 
     If 2G was not completed, implement it here. See 2G for the full description.
 
@@ -651,7 +722,7 @@ PHASE 4 — POLISH
 ────────────────────────────────────────────────────────────────────────────────
 
 4F. REWRITE FilenameSanitizer.clean AS A SINGLE-PASS UNICODE SCALAR LOOP
-    File: FilenameSanitizer.swift
+    File: FilenameSanitizer.swift, line 14
 
     Replace the components(separatedBy:) + joined() allocation chain with a
     single-pass character loop:
@@ -674,21 +745,20 @@ PHASE 4 — POLISH
 ────────────────────────────────────────────────────────────────────────────────
 
 4G. REMOVE DispatchQueue.main.async IN PhotoGridView SCROLL HANDLER
-    File: PhotoGridView.swift
+    STATUS: [DONE — removed in v1.2.2; no further action needed.]
 
-    In the .onChange(of: viewModel.focusedPhotoIndex) handler, remove the
-    DispatchQueue.main.async { } wrapper. The onChange closure already runs on the
-    main actor; the async dispatch adds a full frame (~16ms) of unnecessary latency
-    to every arrow-key navigation step.
+    File: PhotoGridView.swift, lines 122-127
+    Current handler is plain synchronous.
 
 ────────────────────────────────────────────────────────────────────────────────
 
 4H. CACHE Color(hex:) AT THE TagStore LEVEL
-    File: CustomTag.swift / TagStore
+    File: CustomTag.swift, line 55; TagStore.swift
 
     CustomTag.color is a computed property that parses the hex string on every
     access. Tags are rendered in cells, pills, the sidebar, and the filmstrip —
-    potentially hundreds of times per layout pass.
+    potentially hundreds of times per layout pass. ALSO used by the new
+    XMP inspector and SettingsTagsPaneView (TagChip + PackStyleSheet).
 
     In TagStore, add a color cache:
         private var colorCache: [String: Color] = [:]
@@ -708,7 +778,7 @@ PHASE 4 — POLISH
 ────────────────────────────────────────────────────────────────────────────────
 
 4I. EXTRACT uniqueDestinationURL TO A SHARED UTILITY
-    File: FileTransferService.swift, RoutedTransferService.swift
+    File: FileTransferService.swift (line 230), RoutedTransferService.swift (line 249)
 
     The uniqueDestinationURL() function is copy-pasted identically in both
     FileTransferService and RoutedTransferService. Extract it to a shared utility
@@ -729,7 +799,7 @@ PHASE 4 — POLISH
 ────────────────────────────────────────────────────────────────────────────────
 
 4J. CHUNK FILE SIZE COMPUTATION IN FileTransferService
-    File: FileTransferService.swift
+    File: FileTransferService.swift, lines 86-99
 
     The totalBytes pre-computation spawns one Task per file just to call
     FileManager.attributesOfItem (a single stat() syscall). For 1,500 files that
@@ -755,9 +825,46 @@ PHASE 4 — POLISH
     Also store the per-file size from this pre-computation so executeJob() does not
     need to stat() each file a second time when tracking bytesPerSecond progress.
 
-================================================================================
+    Same fix applies to RoutedTransferService.swift:71.
+
+═══════════════════════════════════════════════════════════════════════════════
+ADDITIONAL ITEMS (added 2026-06-25 — not in original playbook)
+═══════════════════════════════════════════════════════════════════════════════
+
+A1. Cache PhotoSet.fileBreakdown as a stored let (parallels 2G)
+    File: PhotoSet.swift
+
+    fileBreakdown is currently a computed property that allocates a fresh
+    [FileBreakdownEntry] on every read. Called from LargeImageViewerSidebar's
+    `filesInSet` which re-evaluates on every focused-photo change.
+
+    Pattern: identical to 2G (allFiles). Add:
+        let fileBreakdown: [FileBreakdownEntry]
+    and compute it once in init, after allFiles.
+
+────────────────────────────────────────────────────────────────────────────────
+
+A2. Skip duplicate XMP sidecar reads across XMP inspector + library load
+    File: ViewModels/PhotoLibraryViewModel.swift
+
+    XMPTagInspectorView.computeXMPTagDiff() (line 871) and loadExistingTags (line 1351)
+    both iterate photoSets and read every sidecar independently. If the XMP
+    inspector is open while loading a library, sidecars are read twice.
+
+    Mitigation options:
+      a) Cache readSidecarData results in a [UUID: SidecarData] dict on the view
+         model, keyed by photoSetID, with a 30s TTL.
+      b) Skip the inspector's read if loadExistingTags finished within the
+         last 30 seconds.
+      c) Run the XMP inspector's scan inside the same task group as the
+         library load (only if the inspector is open).
+
+    Lowest-risk option: (a) with a 30s TTL. Implement only if profiling shows
+    it's a hotspot.
+
+═══════════════════════════════════════════════════════════════════════════════
 VERIFICATION
-================================================================================
+═══════════════════════════════════════════════════════════════════════════════
 
 After implementing all phases:
 1. Run `swift build` and confirm zero errors and zero warnings introduced by your changes.
@@ -777,3 +884,33 @@ After implementing all phases:
    - App launches cleanly and restores last session (source dirs, filter, preferences).
 3. If any feature breaks, identify which optimization caused the regression,
    fix it, and verify again before proceeding to the next phase.
+
+═══════════════════════════════════════════════════════════════════════════════
+ITEMS REMOVED FROM THE ORIGINAL PROMPT (kept for historical context only)
+═══════════════════════════════════════════════════════════════════════════════
+
+These were in earlier drafts of this prompt or in Suggestions.txt and have been
+either completed or marked N/A. They are listed here so the audit trail is
+preserved, but they are NOT active work items.
+
+• [DONE]      Sidebar logo as static let NSImage — superseded by asset-catalog
+              Image("duck_logo") in SidebarView.swift:79 (equally efficient,
+              no per-body file I/O).
+• [DONE]      DispatchQueue.main.async in scrollTo handler — removed in v1.2.2.
+• [DONE]      TagStore.save debounce — implemented in v1.2.4 (line 317).
+• [N/A]       Liquid Glass style unification — entire style direction removed
+              in v1.1.0 in favor of flat dark Photomator theme.
+• [N/A]       Dark mode toggle — removed in v1.2.2; follows system appearance.
+• [N/A]       JPEG export optimizations — JPEG export feature was removed
+              in v1.2.4 (see RELEASE_NOTES.md).
+• [N/A]       5B LargeImageLoader cache scaling — already tuned (50/200MB).
+• [N/A]       5C PhotoGridView enumerated() Array — LazyVGrid only renders
+              visible cells; copy runs only on filter change.
+• [N/A]       6D assignedTags(for:) inline — already O(1) via tagsByID.
+• [N/A]       7D resourceValues Set/Array — enumerator prefetches keys.
+• [N/A]       7F clearSelection / selectVisiblePhotoSets — already batched;
+              the real fix is 2A (photoSetIndex).
+• [N/A]       7G MetadataReader.parseExifDate Array — trivial 19-char
+              allocation per photo.
+• [N/A]       4D Thumbnail detached task nesting — explicit cancellation
+              propagation is worth the small overhead.

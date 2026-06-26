@@ -11,11 +11,17 @@ final class FileTransferSidecarTests: XCTestCase {
         try ImageFixture.writeJPEG(to: media, cameraModel: "X-T5", lensModel: "XF35mm", iso: 400)
         let set = PhotoSet(baseName: "IMG_0001", mediaFiles: [media], editPath: nil)
 
+        // Pass pre-read metadata so the transfer service doesn't have to
+        // re-stat the image. Mirrors what PhotoLibraryViewModel does when
+        // building a real transfer plan.
+        let metadata = MetadataReader().metadata(for: media)
+
         let plan = TransferPlan(
             operation: .copy,
             destinationDirectory: dst,
             photoSets: [set],
-            tagNames: [set.id: ["Family"]]
+            tagNames: [set.id: ["Family"]],
+            metadata: [set.id: metadata]
         )
         let summary = try await FileTransferService().execute(plan)
 
@@ -37,11 +43,16 @@ final class FileTransferSidecarTests: XCTestCase {
         try Data("not a real raw".utf8).write(to: raf)
         let set = PhotoSet(baseName: "IMG", mediaFiles: [jpg, raf], editPath: nil)
 
+        // Pass metadata read from the JPEG so the shared sidecar carries
+        // its camera model (the RAF is unreadable on its own).
+        let metadata = MetadataReader().metadata(for: jpg)
+
         let plan = TransferPlan(
             operation: .copy,
             destinationDirectory: dst,
             photoSets: [set],
-            tagNames: [set.id: ["Family"]]
+            tagNames: [set.id: ["Family"]],
+            metadata: [set.id: metadata]
         )
         let summary = try await FileTransferService().execute(plan)
         XCTAssertEqual(summary.sidecarFailures, 0)
@@ -97,11 +108,17 @@ final class FileTransferSidecarTests: XCTestCase {
         
         let set = PhotoSet(baseName: "IMG_0002", mediaFiles: [media], editPath: nil)
 
+        // Pass pre-read JPEG metadata. The existing source sidecar's
+        // rating (=3) is also baked into the destination because the
+        // merge pipeline prefers the existing sidecar value when set.
+        let metadata = MetadataReader().metadata(for: media)
+
         let plan = TransferPlan(
             operation: .copy,
             destinationDirectory: dst,
             photoSets: [set],
-            tagNames: [set.id: ["Family"]]
+            tagNames: [set.id: ["Family"]],
+            metadata: [set.id: metadata]
         )
         let summary = try await FileTransferService().execute(plan)
 

@@ -1,6 +1,6 @@
 //
 //  SidebarView.swift
-//  PhotomatorSort
+//  DuckSort
 //
 
 import SwiftUI
@@ -11,83 +11,48 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Spacer().frame(height: 38) // Space for macOS traffic lights
-
-            // Header Branding
-            HStack(spacing: 8) {
-                let img: NSImage = {
-                    if let path = Bundle.module.path(forResource: "duck_logo", ofType: "png"),
-                       let image = NSImage(contentsOfFile: path) {
-                        return image
-                    }
-                    if let image = Bundle.module.image(forResource: "duck_logo") {
-                        return image
-                    }
-                    if let image = Bundle.module.image(forResource: "AppIcon") {
-                        return image
-                    }
-                    if let path = Bundle.module.path(forResource: "AppIcon", ofType: "icns"),
-                       let image = NSImage(contentsOfFile: path) {
-                        return image
-                    }
-                    return NSApplication.shared.applicationIconImage ?? NSImage()
-                }()
-                Image(nsImage: img)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 24, height: 24)
-                
-                Text("DuckSort")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(PhotomatorTheme.textPrimary)
-                Spacer()
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 12)
-
-            // Premium linear gradient separator
-            LinearGradient(
-                colors: [PhotomatorTheme.selectedBlue, PhotomatorTheme.selectedBlue.opacity(0.1)],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-            .frame(height: 1)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 10)
-
-            // Search Bar (colored the same as the sidebar background with a border outline)
-            HStack(spacing: 6) {
+            // Search
+            HStack(spacing: Theme.Space.s6) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11))
-                    .foregroundStyle(PhotomatorTheme.textSecondary)
-                TextField("Search files...", text: $viewModel.searchText)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Color.textSecondary)
+                TextField("Search files…", text: $viewModel.searchText)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .foregroundStyle(PhotomatorTheme.textPrimary)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.Color.textPrimary)
                     .focused($isSearchFocused)
                 if !viewModel.searchText.isEmpty {
                     Button {
                         viewModel.searchText = ""
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(PhotomatorTheme.textSecondary)
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Color.textSecondary)
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(PhotomatorTheme.sidebarBackground, in: RoundedRectangle(cornerRadius: 6))
+            .padding(.horizontal, Theme.Space.s8)
+            .padding(.vertical, Theme.Space.s4)
+            .background(Theme.Color.cellBackground, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
             .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(PhotomatorTheme.separator, lineWidth: 1)
+                RoundedRectangle(cornerRadius: Theme.Radius.m)
+                    .stroke(Theme.Color.separator, lineWidth: Theme.Stroke.hairline)
             )
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
+            .padding(.horizontal, Theme.Space.s16)
+            .padding(.bottom, Theme.Space.s8)
 
-            // Sidebar list sections
+            // Permanent filter bar — stays put so it doesn't shift the
+            // rest of the sidebar when the user picks or clears filters.
+            // Greys out when no filters are active.
+            ActiveFiltersBar(
+                count: viewModel.activeFilterCount,
+                isEmpty: viewModel.activeFilterCount == 0,
+                onClear: viewModel.clearAllFilters
+            )
+            .padding(.horizontal, Theme.Space.s16)
+            .padding(.bottom, Theme.Space.s8)
+
             List {
                 LibrarySectionView(viewModel: viewModel)
                 SourcesSectionView(viewModel: viewModel)
@@ -95,23 +60,42 @@ struct SidebarView: View {
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
-            .onTapGesture {
-                NSApp.keyWindow?.makeFirstResponder(nil)
-            }
         }
-        .frame(minWidth: 160, idealWidth: 180, maxWidth: 240)
-        .background(PhotomatorTheme.sidebarBackground)
+        .frame(minWidth: 220, idealWidth: 240, maxWidth: 280)
+        .background(Theme.Color.sidebarBackground)
         .onAppear {
+            // Don't let the first responder auto-grab the search field;
+            // keyboard shortcuts in the grid should work without the user
+            // having to click out of the field first.
             isSearchFocused = false
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 isSearchFocused = false
-                NSApp.keyWindow?.makeFirstResponder(nil)
             }
         }
+    }
+
+    private var brandBar: some View {
+        HStack(spacing: Theme.Space.s8) {
+            Image("duck_logo")
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 24, height: 24)
+
+            Text("DuckSort")
+                .font(Theme.Font.headline)
+                .foregroundStyle(Theme.Color.textPrimary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Theme.Space.s16)
+        .padding(.bottom, Theme.Space.s12)
+        .background(Theme.Color.sidebarBackground)
     }
 }
 
 // MARK: - Library Section View
+
 struct LibrarySectionView: View {
     @ObservedObject var viewModel: PhotoLibraryViewModel
     @State private var hoveredRule: PhotoFilterRule? = nil
@@ -121,24 +105,22 @@ struct LibrarySectionView: View {
             ForEach(PhotoFilterRule.allCases) { rule in
                 Button {
                     viewModel.filterRule = rule
-                    NSApp.keyWindow?.makeFirstResponder(nil)
                 } label: {
                     HStack {
                         Image(systemName: rule.systemImage)
-                            .foregroundStyle(viewModel.filterRule == rule ? PhotomatorTheme.selectedBlue : PhotomatorTheme.textSecondary)
+                            .foregroundStyle(viewModel.filterRule == rule ? Theme.Color.accent : Theme.Color.textSecondary)
                             .frame(width: 16)
                         Text(rule.rawValue)
-                            .foregroundStyle(PhotomatorTheme.textPrimary)
+                            .foregroundStyle(Theme.Color.textPrimary)
                         Spacer()
-                        // Count badge
                         let count = count(for: rule)
                         if count > 0 {
                             Text("\(count)")
-                                .font(.caption)
-                                .foregroundStyle(PhotomatorTheme.textSecondary)
+                                .font(Theme.Font.caption)
+                                .foregroundStyle(Theme.Color.textSecondary)
                         }
                     }
-                    .padding(.vertical, 4)
+                    .padding(.vertical, Theme.Space.s4)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -148,13 +130,13 @@ struct LibrarySectionView: View {
                     }
                 }
                 .listRowBackground(
-                    RoundedRectangle(cornerRadius: 6)
+                    RoundedRectangle(cornerRadius: Theme.Radius.m)
                         .fill(
                             viewModel.filterRule == rule
-                            ? PhotomatorTheme.selectedBlue.opacity(0.15)
-                            : (hoveredRule == rule ? Color.primary.opacity(0.05) : Color.clear)
+                            ? Theme.Color.rowSelectedFill
+                            : (hoveredRule == rule ? Theme.Color.rowHoverFill : Color.clear)
                         )
-                        .padding(.horizontal, 8)
+                        .padding(.horizontal, Theme.Space.s8)
                 )
             }
         }
@@ -162,17 +144,15 @@ struct LibrarySectionView: View {
 
     private func count(for rule: PhotoFilterRule) -> Int {
         switch rule {
-        case .allPhotos:
-            return viewModel.cachedAllPhotosCount
-        case .editedOnly:
-            return viewModel.cachedEditedCount
-        case .uneditedOnly:
-            return viewModel.cachedUneditedCount
+        case .allPhotos:   return viewModel.cachedAllPhotosCount
+        case .editedOnly:  return viewModel.cachedEditedCount
+        case .uneditedOnly: return viewModel.cachedUneditedCount
         }
     }
 }
 
 // MARK: - Sources Section View
+
 struct SourcesSectionView: View {
     @ObservedObject var viewModel: PhotoLibraryViewModel
 
@@ -196,18 +176,15 @@ struct SourcesSectionView: View {
                 )
             }
 
-            Button(action: {
-                viewModel.addSourceDirectory()
-                NSApp.keyWindow?.makeFirstResponder(nil)
-            }) {
-                HStack(spacing: 8) {
+            Button(action: { viewModel.addSourceDirectory() }) {
+                HStack(spacing: Theme.Space.s8) {
                     Image(systemName: "plus.circle")
-                        .foregroundStyle(PhotomatorTheme.selectedBlue)
+                        .foregroundStyle(Theme.Color.accent)
                         .frame(width: 16)
-                    Text("Add Source...")
-                        .foregroundStyle(PhotomatorTheme.selectedBlue)
+                    Text("Add Source…")
+                        .foregroundStyle(Theme.Color.accent)
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, Theme.Space.s4)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -217,6 +194,7 @@ struct SourcesSectionView: View {
 }
 
 // MARK: - Tags Section View
+
 struct TagsSectionView: View {
     @ObservedObject var viewModel: PhotoLibraryViewModel
     @State private var hoveredTagID: UUID? = nil
@@ -231,7 +209,7 @@ struct TagsSectionView: View {
                 SystemFilterRow(
                     name: "Flagged",
                     systemImage: "flag.fill",
-                    iconColor: .white,
+                    iconColor: Theme.Color.textInverse,
                     isSelected: viewModel.selectedFlags.contains(1),
                     count: viewModel.cachedFlagCounts[1] ?? 0,
                     action: { viewModel.toggleFlagFilter(1) }
@@ -239,7 +217,7 @@ struct TagsSectionView: View {
                 SystemFilterRow(
                     name: "Rejected",
                     systemImage: "flag.slash.fill",
-                    iconColor: .red,
+                    iconColor: Theme.Color.danger,
                     isSelected: viewModel.selectedFlags.contains(-1),
                     count: viewModel.cachedFlagCounts[-1] ?? 0,
                     action: { viewModel.toggleFlagFilter(-1) }
@@ -247,7 +225,7 @@ struct TagsSectionView: View {
                 SystemFilterRow(
                     name: "Unrated",
                     systemImage: "star.slash",
-                    iconColor: .gray,
+                    iconColor: Theme.Color.textTertiary,
                     isSelected: viewModel.selectedRatings.contains(0),
                     count: viewModel.cachedRatingCounts[0] ?? 0,
                     action: { viewModel.toggleRatingFilter(0) }
@@ -256,7 +234,7 @@ struct TagsSectionView: View {
                     SystemFilterRow(
                         name: "\(rating) Star\(rating == 1 ? "" : "s")",
                         systemImage: "star.fill",
-                        iconColor: .yellow,
+                        iconColor: Theme.Color.rating,
                         isSelected: viewModel.selectedRatings.contains(rating),
                         count: viewModel.cachedRatingCounts[rating] ?? 0,
                         action: { viewModel.toggleRatingFilter(rating) }
@@ -265,31 +243,27 @@ struct TagsSectionView: View {
             } label: {
                 HStack {
                     Text("Flags & Ratings")
-                        .font(.subheadline)
-                        .foregroundStyle(PhotomatorTheme.textPrimary)
+                        .font(Theme.Font.subheadline)
+                        .foregroundStyle(Theme.Color.textPrimary)
                     Spacer()
                 }
                 .contentShape(Rectangle())
-                .onTapGesture {
-                    isFlagsExpanded.toggle()
-                }
+                .onTapGesture { isFlagsExpanded.toggle() }
                 .onHover { hovering in
-                    withAnimation(.easeInOut(duration: 0.12)) {
-                        isFlagsHovered = hovering
-                    }
+                    withAnimation(.easeInOut(duration: 0.12)) { isFlagsHovered = hovering }
                 }
             }
-            .tint(PhotomatorTheme.textSecondary)
+            .tint(Theme.Color.textSecondary)
             .listRowBackground(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(isFlagsHovered ? Color.primary.opacity(0.05) : Color.clear)
-                    .padding(.horizontal, 8)
+                RoundedRectangle(cornerRadius: Theme.Radius.m)
+                    .fill(isFlagsHovered ? Theme.Color.rowHoverFill : Color.clear)
+                    .padding(.horizontal, Theme.Space.s8)
             )
 
             if viewModel.tagStore.tags.isEmpty {
                 Text("No tags")
-                    .font(.caption)
-                    .foregroundStyle(PhotomatorTheme.textTertiary)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Color.textTertiary)
             } else {
                 ForEach(viewModel.tagStore.categories) { category in
                     let tagsInCategory = viewModel.tagStore.tags(in: category.id)
@@ -312,23 +286,22 @@ struct TagsSectionView: View {
                                     } else {
                                         viewModel.selectedTagFilters.insert(tag.id)
                                     }
-                                    NSApp.keyWindow?.makeFirstResponder(nil)
                                 } label: {
                                     HStack {
                                         Circle()
                                             .fill(tag.color)
                                             .frame(width: 10, height: 10)
                                         Text(tag.name)
-                                            .foregroundStyle(PhotomatorTheme.textPrimary)
+                                            .foregroundStyle(Theme.Color.textPrimary)
                                         Spacer()
                                         let count = viewModel.cachedTagCounts[tag.id] ?? 0
                                         if count > 0 {
                                             Text("\(count)")
-                                                .font(.caption)
-                                                .foregroundStyle(PhotomatorTheme.textSecondary)
+                                                .font(Theme.Font.caption)
+                                                .foregroundStyle(Theme.Color.textSecondary)
                                         }
                                     }
-                                    .padding(.vertical, 4)
+                                    .padding(.vertical, Theme.Space.s4)
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
@@ -338,37 +311,35 @@ struct TagsSectionView: View {
                                     }
                                 }
                                 .listRowBackground(
-                                    RoundedRectangle(cornerRadius: 6)
+                                    RoundedRectangle(cornerRadius: Theme.Radius.m)
                                         .fill(
                                             viewModel.selectedTagFilters.contains(tag.id)
-                                            ? PhotomatorTheme.selectedBlue.opacity(0.15)
-                                            : (hoveredTagID == tag.id ? Color.primary.opacity(0.05) : Color.clear)
+                                            ? Theme.Color.rowSelectedFill
+                                            : (hoveredTagID == tag.id ? Theme.Color.rowHoverFill : Color.clear)
                                         )
-                                        .padding(.horizontal, 8)
+                                        .padding(.horizontal, Theme.Space.s8)
                                 )
                             }
                         } label: {
                             HStack {
                                 Text(category.name)
-                                    .font(.subheadline)
-                                    .foregroundStyle(PhotomatorTheme.textPrimary)
+                                    .font(Theme.Font.subheadline)
+                                    .foregroundStyle(Theme.Color.textPrimary)
                                 Spacer()
                             }
                             .contentShape(Rectangle())
-                            .onTapGesture {
-                                isExpandedBinding.wrappedValue.toggle()
-                            }
+                            .onTapGesture { isExpandedBinding.wrappedValue.toggle() }
                             .onHover { hovering in
                                 withAnimation(.easeInOut(duration: 0.12)) {
                                     hoveredCategoryID = hovering ? category.id : nil
                                 }
                             }
                         }
-                        .tint(PhotomatorTheme.textSecondary)
+                        .tint(Theme.Color.textSecondary)
                         .listRowBackground(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(hoveredCategoryID == category.id ? Color.primary.opacity(0.05) : Color.clear)
-                                .padding(.horizontal, 8)
+                            RoundedRectangle(cornerRadius: Theme.Radius.m)
+                                .fill(hoveredCategoryID == category.id ? Theme.Color.rowHoverFill : Color.clear)
+                                .padding(.horizontal, Theme.Space.s8)
                         )
                     }
                 }
@@ -383,6 +354,7 @@ struct TagsSectionView: View {
 }
 
 // MARK: - Component Row Views
+
 struct SourceRow: View {
     let url: URL
     let isFolder: Bool
@@ -394,61 +366,55 @@ struct SourceRow: View {
     var body: some View {
         HStack {
             Image(systemName: isFolder ? "folder" : "photo")
-                .foregroundStyle(hasError ? Color.red : PhotomatorTheme.textSecondary)
+                .foregroundStyle(hasError ? Theme.Color.danger : Theme.Color.textSecondary)
                 .frame(width: 16)
             Text(url.lastPathComponent)
-                .foregroundStyle(hasError ? Color.red : PhotomatorTheme.textPrimary)
+                .foregroundStyle(hasError ? Theme.Color.danger : Theme.Color.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
 
             if hasError {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.red)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Color.danger)
                     .help("Failed to read this source")
             }
 
             Spacer()
 
             if isHovered {
-                HStack(spacing: 8) {
+                HStack(spacing: Theme.Space.s8) {
                     Button(action: onReveal) {
                         Image(systemName: "magnifyingglass")
-                            .font(.system(size: 11))
-                            .foregroundStyle(PhotomatorTheme.textSecondary)
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Color.textSecondary)
                     }
                     .buttonStyle(.plain)
                     .help("Reveal in Finder")
 
                     Button(action: onRemove) {
                         Image(systemName: "xmark.circle")
-                            .font(.system(size: 11))
-                            .foregroundStyle(PhotomatorTheme.textSecondary)
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Color.textSecondary)
                     }
                     .buttonStyle(.plain)
                     .help(isFolder ? "Remove source folder" : "Remove source file")
                 }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, Theme.Space.s4)
         .contentShape(Rectangle())
         .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.12)) {
-                isHovered = hovering
-            }
+            withAnimation(.easeInOut(duration: 0.12)) { isHovered = hovering }
         }
         .contextMenu {
-            Button("Reveal in Finder") {
-                onReveal()
-            }
-            Button(isFolder ? "Remove Source Folder" : "Remove Source File") {
-                onRemove()
-            }
+            Button("Reveal in Finder") { onReveal() }
+            Button(isFolder ? "Remove Source Folder" : "Remove Source File") { onRemove() }
         }
         .listRowBackground(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isHovered ? Color.primary.opacity(0.05) : Color.clear)
-                .padding(.horizontal, 8)
+            RoundedRectangle(cornerRadius: Theme.Radius.m)
+                .fill(isHovered ? Theme.Color.rowHoverFill : Color.clear)
+                .padding(.horizontal, Theme.Space.s8)
         )
     }
 }
@@ -469,36 +435,35 @@ struct SystemFilterRow: View {
                     .foregroundStyle(iconColor)
                     .frame(width: 12, height: 12)
                 Text(name)
-                    .foregroundStyle(PhotomatorTheme.textPrimary)
+                    .foregroundStyle(Theme.Color.textPrimary)
                 Spacer()
                 if count > 0 {
                     Text("\(count)")
-                        .font(.caption)
-                        .foregroundStyle(PhotomatorTheme.textSecondary)
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Color.textSecondary)
                 }
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, Theme.Space.s4)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.12)) {
-                isHovered = hovering
-            }
+            withAnimation(.easeInOut(duration: 0.12)) { isHovered = hovering }
         }
         .listRowBackground(
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: Theme.Radius.m)
                 .fill(
                     isSelected
-                    ? PhotomatorTheme.selectedBlue.opacity(0.15)
-                    : (isHovered ? Color.primary.opacity(0.05) : Color.clear)
+                    ? Theme.Color.rowSelectedFill
+                    : (isHovered ? Theme.Color.rowHoverFill : Color.clear)
                 )
-                .padding(.horizontal, 8)
+                .padding(.horizontal, Theme.Space.s8)
         )
     }
 }
 
 // MARK: - Custom Section / Subfolder Rows
+
 struct SourceSectionRow: View {
     @ObservedObject var viewModel: PhotoLibraryViewModel
     let url: URL
@@ -524,7 +489,7 @@ struct SourceSectionRow: View {
                     }
                 )
             }
-            .tint(PhotomatorTheme.textSecondary)
+            .tint(Theme.Color.textSecondary)
         } else {
             SourceRow(
                 url: url,
@@ -558,41 +523,105 @@ struct SubfolderRow: View {
             } else {
                 viewModel.selectedSubfolderFilter = subfolder
             }
-            NSApp.keyWindow?.makeFirstResponder(nil)
         }) {
             HStack {
                 Image(systemName: "folder")
-                    .foregroundStyle(isSelected ? PhotomatorTheme.selectedBlue : PhotomatorTheme.textSecondary)
+                    .foregroundStyle(isSelected ? Theme.Color.accent : Theme.Color.textSecondary)
                     .frame(width: 12, height: 12)
                 Text(name)
-                    .font(.subheadline)
-                    .foregroundStyle(PhotomatorTheme.textPrimary)
+                    .font(Theme.Font.subheadline)
+                    .foregroundStyle(Theme.Color.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer()
                 if count > 0 {
                     Text("\(count)")
-                        .font(.caption)
-                        .foregroundStyle(PhotomatorTheme.textSecondary)
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Color.textSecondary)
                 }
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, Theme.Space.s4)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.12)) {
-                isHovered = hovering
-            }
+            withAnimation(.easeInOut(duration: 0.12)) { isHovered = hovering }
         }
         .listRowBackground(
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: Theme.Radius.m)
                 .fill(
                     isSelected
-                    ? PhotomatorTheme.selectedBlue.opacity(0.15)
-                    : (isHovered ? Color.primary.opacity(0.05) : Color.clear)
+                    ? Theme.Color.rowSelectedFill
+                    : (isHovered ? Theme.Color.rowHoverFill : Color.clear)
                 )
-                .padding(.horizontal, 8)
+                .padding(.horizontal, Theme.Space.s8)
         )
+    }
+}
+
+// MARK: - Active Filters Bar
+
+struct ActiveFiltersBar: View {
+    let count: Int
+    let isEmpty: Bool
+    let onClear: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: Theme.Space.s6) {
+            Image(systemName: isEmpty
+                  ? "line.3.horizontal.decrease.circle"
+                  : "line.3.horizontal.decrease.circle.fill")
+                .foregroundStyle(isEmpty ? Theme.Color.textTertiary : Theme.Color.accent)
+                .font(Theme.Font.subheadline)
+
+            Text(isEmpty
+                 ? "No active filters"
+                 : "^[\(count) active filter](inflect: true)")
+                .font(Theme.Font.caption)
+                .foregroundStyle(isEmpty ? Theme.Color.textTertiary : Theme.Color.textPrimary)
+                .lineLimit(1)
+
+            Spacer(minLength: Theme.Space.s4)
+
+            Button(action: onClear) {
+                Text("Clear")
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(isEmpty ? Theme.Color.textTertiary : Theme.Color.accent)
+                    .padding(.horizontal, Theme.Space.s8)
+                    .padding(.vertical, Theme.Space.s2)
+                    .background(
+                        isHovered && !isEmpty
+                            ? Theme.Color.rowSelectedFill
+                            : Color.clear,
+                        in: RoundedRectangle(cornerRadius: Theme.Radius.s)
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(isEmpty)
+            .help(isEmpty
+                  ? "Pick a tag, rating, or flag in the list below to filter the grid."
+                  : "Clear all filters and search")
+        }
+        .padding(.horizontal, Theme.Space.s8)
+        .padding(.vertical, Theme.Space.s4)
+        .background(
+            isEmpty
+                ? Theme.Color.surfaceRaised.opacity(0.4)
+                : Theme.Color.rowSelectedFill,
+            in: RoundedRectangle(cornerRadius: Theme.Radius.m)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.m)
+                .stroke(
+                    isEmpty
+                        ? Theme.Color.surfaceDivider
+                        : Theme.Color.accent.opacity(0.3),
+                    lineWidth: Theme.Stroke.hairline
+                )
+        )
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.12)) { isHovered = hovering }
+        }
     }
 }

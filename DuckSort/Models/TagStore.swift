@@ -23,6 +23,13 @@ final class TagStore: ObservableObject {
     private var tagsByCategoryID: [UUID: [CustomTag]] = [:]
     private var tagsByID: [UUID: CustomTag] = [:]
     private var tagsByName: [String: CustomTag] = [:]
+    /// O(1) lookup of a tag by its parsed keyboard shortcut. Rebuilt
+    /// inside `updateIndexes()` so `ContentView` doesn't have to iterate
+    /// every tag + re-parse hotkey strings on every keypress.
+    private var tagsByShortcut: [KeyboardShortcutInfo: CustomTag] = [:]
+    /// O(1) lookup of a `Color` for a tag's hex string. Cleared whenever
+    /// `updateIndexes()` runs so stale colors don't leak after edits.
+    private var colorCache: [String: Color] = [:]
     private var categoryNamesByID: [UUID: String] = [:]
     private var categoriesByID: [UUID: TagCategory] = [:]
 
@@ -40,6 +47,15 @@ final class TagStore: ObservableObject {
         tagsByName = tags.reduce(into: [String: CustomTag]()) { dict, tag in
             dict[tag.name] = tag
         }
+        tagsByShortcut = [:]
+        for tag in tags {
+            if let shortcut = tag.shortcutInfo {
+                tagsByShortcut[shortcut] = tag
+            }
+        }
+        // Color cache must be invalidated alongside the tag list since
+        // hex strings can change on edit and old entries would be stale.
+        colorCache = [:]
         categoryNamesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0.name) })
         categoriesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
     }
@@ -88,6 +104,23 @@ final class TagStore: ObservableObject {
 
     func assignedTagIDs(for photoSetID: UUID) -> Set<UUID> {
         assignments[photoSetID]?.tagIDs ?? []
+    }
+
+    /// O(1) lookup of a tag by its parsed keyboard shortcut. Used by the
+    /// global keypress monitor so it doesn't have to iterate every tag and
+    /// re-parse its hotkey string on every key event.
+    func tag(for shortcut: KeyboardShortcutInfo) -> CustomTag? {
+        tagsByShortcut[shortcut]
+    }
+
+    /// Cached `Color` for a tag's hex string. Called many times per layout
+    /// pass (cells, pills, sidebar, filmstrip, XMP inspector, settings)
+    /// so avoiding the per-call hex parse adds up.
+    func color(for tag: CustomTag) -> Color {
+        if let cached = colorCache[tag.colorHex] { return cached }
+        let color = Color(hex: tag.colorHex) ?? .accentColor
+        colorCache[tag.colorHex] = color
+        return color
     }
 
     // MARK: - Category management
@@ -139,7 +172,7 @@ final class TagStore: ObservableObject {
         ]
         
         let selectedColor = colorHex ?? palette[tags.count % palette.count]
-        let tag = CustomTag(name: name, categoryID: categoryID, hotkey: hotkey, colorHex: selectedColor)
+        let tag = CustomTag(name: name, categoryID: categoryID, hotkey: sanitizedHotkey(hotkey), colorHex: selectedColor)
         tags.append(tag)
         updateIndexes()
         save()
@@ -148,7 +181,9 @@ final class TagStore: ObservableObject {
 
     func updateTag(_ tag: CustomTag) {
         guard let index = tags.firstIndex(where: { $0.id == tag.id }) else { return }
-        tags[index] = tag
+        var updated = tag
+        updated.hotkey = sanitizedHotkey(tag.hotkey, excluding: tag.id)
+        tags[index] = updated
         updateIndexes()
         save()
     }
@@ -158,6 +193,85 @@ final class TagStore: ObservableObject {
         for key in assignments.keys {
             assignments[key]?.tagIDs.remove(id)
         }
+        updateIndexes()
+        save()
+    }
+
+    /// Wipe every category, tag, and per-photo tag assignment. Used when
+    /// the user picks a new tag pack during onboarding or hits "Reset tag
+    /// pack" in Settings → Tags.
+    func clearAllTags() {
+        tags.removeAll()
+        categories.removeAll()
+        assignments.removeAll()
+        updateIndexes()
+        save()
+    }
+
+    /// Clear every tag's hotkey without touching categories, tag names, or
+    /// assignments. Useful when hotkeys have collided and the user wants
+    /// to start over.
+    func clearAllHotkeys() {
+        for index in tags.indices {
+            tags[index].hotkey = nil
+        }
+        updateIndexes()
+        save()
+    }
+
+    /// Replace every category and tag with the contents of ``pack``. Used
+    /// by the onboarding wizard when the user picks a template. Existing
+    /// assignments are dropped because their tag IDs no longer exist.
+    func applyPack(_ pack: TagPackTemplate) {
+        var newCategories: [TagCategory] = []
+        for name in pack.categories {
+            newCategories.append(TagCategory(name: name))
+        }
+        var newTags: [CustomTag] = []
+        for spec in pack.tags {
+            guard let category = newCategories.first(where: { $0.name == spec.category })
+            else { continue }
+            newTags.append(CustomTag(
+                name: spec.name,
+                categoryID: category.id,
+                hotkey: spec.hotkey,
+                colorHex: spec.colorHex
+            ))
+        }
+        categories = newCategories
+        tags = newTags
+        sanitizeAllHotkeys()
+        assignments.removeAll()
+        updateIndexes()
+        save()
+    }
+
+    /// Replace categories + tags with the contents of a saved `TagPackState`.
+    /// Used by `TagPackLibrary` when switching between packs so each pack
+    /// has its own independently-edited state.
+    func applyPackState(_ state: TagPackState) {
+        var newCategories: [TagCategory] = []
+        var seenNames = Set<String>()
+        for entry in state.categories {
+            guard !seenNames.contains(entry.name) else { continue }
+            seenNames.insert(entry.name)
+            newCategories.append(TagCategory(name: entry.name))
+        }
+        var newTags: [CustomTag] = []
+        for entry in state.tags {
+            guard let category = newCategories.first(where: { $0.name == entry.category })
+            else { continue }
+            newTags.append(CustomTag(
+                name: entry.name,
+                categoryID: category.id,
+                hotkey: entry.hotkey,
+                colorHex: entry.colorHex
+            ))
+        }
+        categories = newCategories
+        tags = newTags
+        sanitizeAllHotkeys()
+        assignments.removeAll()
         updateIndexes()
         save()
     }
@@ -226,6 +340,7 @@ final class TagStore: ObservableObject {
             tags = decoded.tags
             let map = Dictionary(uniqueKeysWithValues: decoded.assignments.map { ($0.photoSetID, $0) })
             assignments = map
+            sanitizeAllHotkeys()
             updateIndexes()
         } catch {
             print("Failed to load TagStore JSON: \(error)")
@@ -262,21 +377,33 @@ final class TagStore: ObservableObject {
     // MARK: - Default seeding
 
     private func seedDefaults() {
-        let people = TagCategory(name: "People")
-        let scene = TagCategory(name: "Scene")
-        let action = TagCategory(name: "Action")
-        categories = [people, scene, action]
+        // First-launch defaults use the neutral General pack so new users
+        // aren't locked into a specific shoot type. They can swap to a
+        // specialized pack anytime from Settings → Tags or Help → Show
+        // Welcome Guide.
+        if let pack = TagPack.pack(id: TagPack.defaultPackID) {
+            applyPack(pack)
+        }
+    }
 
-        tags = [
-            CustomTag(name: "Graduate", categoryID: people.id, hotkey: "g", colorHex: "#FF6B6B"),
-            CustomTag(name: "Family",   categoryID: people.id, hotkey: "f", colorHex: "#FFA94D"),
-            CustomTag(name: "Ceremony", categoryID: scene.id,  hotkey: "c", colorHex: "#4ECDC4"),
-            CustomTag(name: "Reception",categoryID: scene.id,  hotkey: "r", colorHex: "#48BFE3"),
-            CustomTag(name: "Walking",  categoryID: action.id, hotkey: "w", colorHex: "#A78BFA"),
-            CustomTag(name: "Dancing",  categoryID: action.id, hotkey: "d", colorHex: "#F472B6")
-        ]
+    private func sanitizedHotkey(_ hotkey: String?, excluding tagID: UUID? = nil) -> String? {
+        guard let hotkey, !hotkey.isEmpty else { return nil }
+        guard TagHotkeyRules.reservedReason(for: hotkey) == nil else { return nil }
+        let duplicate = tags.contains { other in
+            other.id != tagID && other.hotkey == hotkey
+        }
+        return duplicate ? nil : hotkey
+    }
 
-        updateIndexes()
-        performSave()
+    private func sanitizeAllHotkeys() {
+        var seen = Set<String>()
+        for index in tags.indices {
+            guard let hotkey = tags[index].hotkey, !hotkey.isEmpty else { continue }
+            if TagHotkeyRules.reservedReason(for: hotkey) != nil || seen.contains(hotkey) {
+                tags[index].hotkey = nil
+            } else {
+                seen.insert(hotkey)
+            }
+        }
     }
 }

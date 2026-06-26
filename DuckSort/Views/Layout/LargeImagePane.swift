@@ -29,7 +29,7 @@ struct LargeImagePane: View {
                 .ignoresSafeArea()
 
             let highResImage = (imageLoader.loadedURL == photoSet.preferredPreviewURL ? imageLoader.image : nil) ?? LargeImageLoader.cachedImage(for: photoSet.preferredPreviewURL)
-            let lowResImage = ThumbnailLoader.cachedImage(for: photoSet.preferredPreviewURL)
+            let lowResImage = photoSet.preferredPreviewURL.flatMap { ThumbnailCache.global.image(for: $0) }
 
             if highResImage != nil || lowResImage != nil {
                 GeometryReader { geometry in
@@ -201,7 +201,7 @@ final class LargeImageLoader: ObservableObject {
         return c
     }()
 
-    private static func cost(for image: NSImage) -> Int {
+    nonisolated private static func cost(for image: NSImage) -> Int {
         if let rep = image.representations.first {
             let w = rep.pixelsWide
             let h = rep.pixelsHigh
@@ -210,6 +210,30 @@ final class LargeImageLoader: ObservableObject {
             }
         }
         return Int(image.size.width * image.size.height * 4)
+    }
+
+    /// Downsamples `image` so that neither side exceeds `maxPixels`.
+    /// Used as a HEIF fallback when CGImageSource can't produce a thumbnail.
+    nonisolated fileprivate static func downsample(image: NSImage, maxPixels: CGFloat) -> NSImage {
+        guard let rep = image.representations.first else { return image }
+        let fullW = CGFloat(rep.pixelsWide > 0 ? rep.pixelsWide : Int(image.size.width))
+        let fullH = CGFloat(rep.pixelsHigh > 0 ? rep.pixelsHigh : Int(image.size.height))
+        guard fullW > 0, fullH > 0 else { return image }
+        let scale = min(maxPixels / max(fullW, fullH), 1.0)
+        guard scale < 1.0 else { return image }
+        let targetW = Int(fullW * scale)
+        let targetH = Int(fullH * scale)
+        let resized = NSImage(size: NSSize(width: targetW, height: targetH))
+        resized.lockFocus()
+        NSGraphicsContext.current?.imageInterpolation = .high
+        image.draw(
+            in: NSRect(x: 0, y: 0, width: targetW, height: targetH),
+            from: NSRect(x: 0, y: 0, width: image.size.width, height: image.size.height),
+            operation: .copy,
+            fraction: 1.0
+        )
+        resized.unlockFocus()
+        return resized
     }
 
     static func cachedImage(for url: URL?) -> NSImage? {
@@ -223,23 +247,34 @@ final class LargeImageLoader: ObservableObject {
         if cache.object(forKey: standardized as NSURL) != nil {
             return
         }
-        
+
         let ext = url.pathExtension.lowercased()
         let alwaysCreate = FileExtension.rawLikeExtensions.contains(ext)
         Task.detached(priority: .userInitiated) {
-            guard let imageSource = CGImageSourceCreateWithURL(standardized as CFURL, nil) else { return }
-            let options: [CFString: Any] = [
-                alwaysCreate ? kCGImageSourceCreateThumbnailFromImageAlways : kCGImageSourceCreateThumbnailFromImageIfAbsent: true,
-                kCGImageSourceThumbnailMaxPixelSize: CGFloat(2048),
-                kCGImageSourceCreateThumbnailWithTransform: true
-            ]
-            guard let thumbnailCG = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) else { return }
-            
-            let previewImage = NSImage(cgImage: thumbnailCG, size: NSSize(width: thumbnailCG.width, height: thumbnailCG.height))
-            let cost = thumbnailCG.width * thumbnailCG.height * 4
-            
-            await MainActor.run {
-                cache.setObject(previewImage, forKey: standardized as NSURL, cost: cost)
+            if let imageSource = CGImageSourceCreateWithURL(standardized as CFURL, nil) {
+                let options: [CFString: Any] = [
+                    alwaysCreate ? kCGImageSourceCreateThumbnailFromImageAlways : kCGImageSourceCreateThumbnailFromImageIfAbsent: true,
+                    kCGImageSourceThumbnailMaxPixelSize: CGFloat(2048),
+                    kCGImageSourceCreateThumbnailWithTransform: true
+                ]
+                if let thumbnailCG = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) {
+                    let previewImage = NSImage(cgImage: thumbnailCG, size: NSSize(width: thumbnailCG.width, height: thumbnailCG.height))
+                    let cost = thumbnailCG.width * thumbnailCG.height * 4
+                    await MainActor.run {
+                        cache.setObject(previewImage, forKey: standardized as NSURL, cost: cost)
+                    }
+                    return
+                }
+            }
+
+            // HEIF-friendly fallback when CGImageSource refuses the file.
+            if FileExtension.heifLikeExtensions.contains(ext),
+               let raw = NSImage(contentsOf: standardized) {
+                let downsampled = downsample(image: raw, maxPixels: 2048)
+                let cost = Self.cost(for: downsampled)
+                await MainActor.run {
+                    cache.setObject(downsampled, forKey: standardized as NSURL, cost: cost)
+                }
             }
         }
     }
@@ -288,6 +323,26 @@ final class LargeImageLoader: ObservableObject {
             image = previewImage
             loadedURL = url
             return
+        }
+
+        // 1b. HEIF/HEIC native fallback. Some HEIC bursts return nil from
+        // CGImageSourceCreateThumbnailAtIndex; NSImage(contentsOf:) handles
+        // them through the system codec.
+        if FileExtension.heifLikeExtensions.contains(ext) {
+            if Task.isCancelled { return }
+            let fallbackTask = Task.detached(priority: .userInitiated) { () -> NSImage? in
+                if Task.isCancelled { return nil }
+                guard let raw = NSImage(contentsOf: url) else { return nil }
+                return Self.downsample(image: raw, maxPixels: 2048)
+            }
+            if let nsImage = await fallbackTask.value {
+                if Task.isCancelled { return }
+                let cost = Self.cost(for: nsImage)
+                Self.cache.setObject(nsImage, forKey: url.standardizedFileURL as NSURL, cost: cost)
+                image = nsImage
+                loadedURL = url
+                return
+            }
         }
 
         if Task.isCancelled { return }
