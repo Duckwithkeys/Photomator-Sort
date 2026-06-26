@@ -20,9 +20,18 @@ final class UserPreferences: ObservableObject {
     @Published var lastLooseFilePaths: [String] = []
     @Published var lastDestinationDirectoryID: String?
     @Published var lastFilterRule: PhotoFilterRule = .allPhotos
-    @Published var isJpegOnlyMode: Bool = false
     @Published var isInspectorOpen: Bool = false
     @Published var showAdvancedEXIF: Bool = false
+
+    // MARK: - Auto Tagging
+
+    /// Master toggle for auto-tagging. When enabled, suggestions are
+    /// evaluated when a photo is focused in the large viewer.
+    @Published var autoTaggingEnabled: Bool = true
+
+    /// Configurable rules for auto-tagging. Defaults to the shipped
+    /// default rules.
+    @Published var autoTaggingRules: [AutoTagRule] = AutoTagRule.defaultRules
 
     /// ID of the tag pack the user has most recently activated. Empty when
     /// the user has never picked a pack or has cleared all tags manually.
@@ -35,7 +44,6 @@ final class UserPreferences: ObservableObject {
     @Published var tagManagerHotkey: String = "cmd+t"
     @Published var ruleEditorHotkey: String = "cmd+r"
     @Published var openSourceHotkey: String = "cmd+o"
-    @Published var jpegOnlyHotkey: String = "shift+cmd+q"
 
     // MARK: - IPTC / Copyright Embedding
     //
@@ -71,15 +79,17 @@ final class UserPreferences: ObservableObject {
         static let source      = "lastSourceDirectory" // for migration
         static let destination = "lastDestinationDirectory"
         static let filter      = "lastFilterRule"
-        static let isJpegOnlyMode = "isJpegOnlyMode"
         static let isInspectorOpen = "isInspectorOpen"
         static let showAdvancedEXIF = "showAdvancedEXIF"
         static let activeTagPackID = "activeTagPackID"
+
+        // Auto tagging
+        static let autoTaggingEnabled = "autoTaggingEnabled"
+        static let autoTaggingRules = "autoTaggingRules"
         static let hasCompletedOnboarding = "hasCompletedOnboarding"
         static let tagManagerHotkey = "tagManagerHotkey"
         static let ruleEditorHotkey = "ruleEditorHotkey"
         static let openSourceHotkey = "openSourceHotkey"
-        static let jpegOnlyHotkey = "jpegOnlyHotkey"
 
         // IPTC / copyright
         static let embedIPTCInExports     = "embedIPTCInExports"
@@ -119,15 +129,19 @@ final class UserPreferences: ObservableObject {
         UserDefaults.standard.set(lastLooseFilePaths, forKey: Keys.looseFiles)
         UserDefaults.standard.set(lastDestinationDirectoryID, forKey: Keys.destination)
         UserDefaults.standard.set(lastFilterRule.rawValue, forKey: Keys.filter)
-        UserDefaults.standard.set(isJpegOnlyMode, forKey: Keys.isJpegOnlyMode)
         UserDefaults.standard.set(isInspectorOpen, forKey: Keys.isInspectorOpen)
         UserDefaults.standard.set(showAdvancedEXIF, forKey: Keys.showAdvancedEXIF)
         UserDefaults.standard.set(activeTagPackID, forKey: Keys.activeTagPackID)
+
+        // Auto tagging
+        UserDefaults.standard.set(autoTaggingEnabled, forKey: Keys.autoTaggingEnabled)
+        if let encoded = try? JSONEncoder().encode(autoTaggingRules) {
+            UserDefaults.standard.set(encoded, forKey: Keys.autoTaggingRules)
+        }
         UserDefaults.standard.set(hasCompletedOnboarding, forKey: Keys.hasCompletedOnboarding)
         UserDefaults.standard.set(tagManagerHotkey, forKey: Keys.tagManagerHotkey)
         UserDefaults.standard.set(ruleEditorHotkey, forKey: Keys.ruleEditorHotkey)
         UserDefaults.standard.set(openSourceHotkey, forKey: Keys.openSourceHotkey)
-        UserDefaults.standard.set(jpegOnlyHotkey, forKey: Keys.jpegOnlyHotkey)
 
         UserDefaults.standard.set(embedIPTCInExports, forKey: Keys.embedIPTCInExports)
         UserDefaults.standard.set(iptcCreatorName, forKey: Keys.iptcCreatorName)
@@ -154,16 +168,21 @@ final class UserPreferences: ObservableObject {
             lastFilterRule = rule
         }
 
-        isJpegOnlyMode = UserDefaults.standard.bool(forKey: Keys.isJpegOnlyMode)
         isInspectorOpen = UserDefaults.standard.bool(forKey: Keys.isInspectorOpen)
         showAdvancedEXIF = UserDefaults.standard.bool(forKey: Keys.showAdvancedEXIF)
         activeTagPackID = UserDefaults.standard.string(forKey: Keys.activeTagPackID) ?? TagPack.defaultPackID
+
+        // Auto tagging
+        autoTaggingEnabled = UserDefaults.standard.bool(forKey: Keys.autoTaggingEnabled)
+        if let data = UserDefaults.standard.data(forKey: Keys.autoTaggingRules) {
+            autoTaggingRules = (try? JSONDecoder().decode([AutoTagRule].self, from: data))
+                ?? AutoTagRule.defaultRules
+        }
         hasCompletedOnboarding = UserDefaults.standard.bool(forKey: Keys.hasCompletedOnboarding)
 
         tagManagerHotkey = UserDefaults.standard.string(forKey: Keys.tagManagerHotkey) ?? "cmd+t"
         ruleEditorHotkey = UserDefaults.standard.string(forKey: Keys.ruleEditorHotkey) ?? "cmd+r"
         openSourceHotkey = UserDefaults.standard.string(forKey: Keys.openSourceHotkey) ?? "cmd+o"
-        jpegOnlyHotkey = UserDefaults.standard.string(forKey: Keys.jpegOnlyHotkey) ?? "shift+cmd+q"
 
         embedIPTCInExports = UserDefaults.standard.bool(forKey: Keys.embedIPTCInExports)
         iptcCreatorName = UserDefaults.standard.string(forKey: Keys.iptcCreatorName) ?? ""
@@ -180,15 +199,17 @@ final class UserPreferences: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Keys.source)
         UserDefaults.standard.removeObject(forKey: Keys.destination)
         UserDefaults.standard.removeObject(forKey: Keys.filter)
-        UserDefaults.standard.removeObject(forKey: Keys.isJpegOnlyMode)
         UserDefaults.standard.removeObject(forKey: Keys.isInspectorOpen)
         UserDefaults.standard.removeObject(forKey: Keys.showAdvancedEXIF)
         UserDefaults.standard.removeObject(forKey: Keys.activeTagPackID)
+
+        // Auto tagging
+        UserDefaults.standard.removeObject(forKey: Keys.autoTaggingEnabled)
+        UserDefaults.standard.removeObject(forKey: Keys.autoTaggingRules)
         UserDefaults.standard.removeObject(forKey: Keys.hasCompletedOnboarding)
         UserDefaults.standard.removeObject(forKey: Keys.tagManagerHotkey)
         UserDefaults.standard.removeObject(forKey: Keys.ruleEditorHotkey)
         UserDefaults.standard.removeObject(forKey: Keys.openSourceHotkey)
-        UserDefaults.standard.removeObject(forKey: Keys.jpegOnlyHotkey)
 
         UserDefaults.standard.removeObject(forKey: Keys.embedIPTCInExports)
         UserDefaults.standard.removeObject(forKey: Keys.iptcCreatorName)
@@ -202,15 +223,17 @@ final class UserPreferences: ObservableObject {
         lastLooseFilePaths = []
         lastDestinationDirectoryID = nil
         lastFilterRule = .allPhotos
-        isJpegOnlyMode = false
         isInspectorOpen = false
         showAdvancedEXIF = false
         activeTagPackID = TagPack.defaultPackID
+
+        // Auto tagging
+        autoTaggingEnabled = true
+        autoTaggingRules = AutoTagRule.defaultRules
         hasCompletedOnboarding = false
         tagManagerHotkey = "cmd+t"
         ruleEditorHotkey = "cmd+r"
         openSourceHotkey = "cmd+o"
-        jpegOnlyHotkey = "shift+cmd+q"
 
         embedIPTCInExports = false
         iptcCreatorName = ""
