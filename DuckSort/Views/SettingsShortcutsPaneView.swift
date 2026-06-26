@@ -125,8 +125,6 @@ private struct ShortcutsDetailContent: View {
                 case .appActions:
                     ShortcutsSectionHeader(title: "APP ACTIONS")
 
-                    ShortcutEditableRow(label: "Toggle JPEG Only Mode", hotkey: $viewModel.jpegOnlyHotkey)
-
                 case .culling:
                     ShortcutsSectionHeader(title: "CULLING CONTROL")
 
