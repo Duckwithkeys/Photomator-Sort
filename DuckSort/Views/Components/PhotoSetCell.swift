@@ -17,7 +17,6 @@ struct PhotoSetCell: View, Equatable {
     let photoSet: PhotoSet
     let tags: [CustomTag]
     let isFocusedGridItem: Bool
-    let isJpegOnlyMode: Bool
     let handleClick: (MouseClick) -> Void
     let openInViewer: () -> Void
     @State private var isHovered = false
@@ -28,8 +27,7 @@ struct PhotoSetCell: View, Equatable {
     static func == (lhs: PhotoSetCell, rhs: PhotoSetCell) -> Bool {
         lhs.photoSet == rhs.photoSet &&
         lhs.tags == rhs.tags &&
-        lhs.isFocusedGridItem == rhs.isFocusedGridItem &&
-        lhs.isJpegOnlyMode == rhs.isJpegOnlyMode
+        lhs.isFocusedGridItem == rhs.isFocusedGridItem
     }
 
     enum MouseClick {
