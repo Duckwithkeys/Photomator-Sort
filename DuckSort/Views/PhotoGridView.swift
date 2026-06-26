@@ -171,7 +171,6 @@ struct PhotoGridView: View {
             photoSet: photoSet,
             tags: viewModel.assignedTags(for: photoSet),
             isFocusedGridItem: isFocused,
-            isJpegOnlyMode: viewModel.isJpegOnlyMode,
             handleClick: { click in
                 viewModel.focusedPhotoIndex = index
                 switch click {
