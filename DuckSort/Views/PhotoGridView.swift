@@ -37,125 +37,138 @@ struct PhotoGridView: View {
     }
 
     var body: some View {
-        ScrollViewReader { scrollProxy in
-            ZStack(alignment: .topLeading) {
-                // Layer 1: Empty-space hit area for marquee drag. Cells (above)
-                // will absorb clicks first, so this gesture only ever fires
-                // when the drag begins on a point not covered by any cell.
-                Color.clear
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture(minimumDistance: 4, coordinateSpace: .named("PhotoGrid"))
-                            .onChanged { value in
-                                if marqueeStart == nil {
-                                    if !isPointInAnyCell(value.startLocation) {
-                                        marqueeStart = value.startLocation
-                                    } else {
-                                        return
-                                    }
-                                }
-                                marqueeCurrent = value.location
-                            }
-                            .onEnded { value in
-                                guard let start = marqueeStart else { return }
-                                let end = marqueeCurrent ?? value.location
-                                let rect = CGRect(
-                                    x: min(start.x, end.x),
-                                    y: min(start.y, end.y),
-                                    width: abs(end.x - start.x),
-                                    height: abs(end.y - start.y)
-                                )
-                                let hitIDs = cellFrames
-                                    .filter { $0.value.intersects(rect) }
-                                    .map { $0.key }
-                                if !hitIDs.isEmpty {
-                                    viewModel.replaceSelection(with: hitIDs)
-                                    viewModel.selectionAnchorID = hitIDs.last
-                                }
-                                marqueeStart = nil
-                                marqueeCurrent = nil
-                            }
-                    )
+        VStack(alignment: .leading, spacing: 0) {
+            Text(viewModel.filterRule.rawValue)
+                .font(Theme.Font.headline)
+                .foregroundStyle(Theme.Color.textPrimary)
+                .padding(.horizontal, Self.horizontalPadding)
+                .padding(.top, Theme.Space.s12)
+                .padding(.bottom, Theme.Space.s10)
 
-                // Layer 2: Cells. Layered above the marquee hit area so
-                // normal clicks land on the cell's button first.
-                ScrollView {
-                    LazyVGrid(columns: columns, spacing: Self.gridSpacing) {
-                        ForEach(Array(viewModel.filteredPhotoSets.enumerated()), id: \.element.id) { index, photoSet in
-                            cell(for: index, photoSet: photoSet)
-                                .id(photoSet.id)
-                                .background(
-                                    GeometryReader { proxy in
-                                        Color.clear
-                                            .preference(
-                                                key: CellFramePreferenceKey.self,
-                                                value: [CellFrame(id: photoSet.id, frame: proxy.frame(in: .named("PhotoGrid")))]
-                                            )
+            Rectangle()
+                .frame(height: 1)
+                .foregroundStyle(Color.white.opacity(0.12))
+
+            ScrollViewReader { scrollProxy in
+                ZStack(alignment: .topLeading) {
+                    // Layer 1: Empty-space hit area for marquee drag. Cells (above)
+                    // will absorb clicks first, so this gesture only ever fires
+                    // when the drag begins on a point not covered by any cell.
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 4, coordinateSpace: .named("PhotoGrid"))
+                                .onChanged { value in
+                                    if marqueeStart == nil {
+                                        if !isPointInAnyCell(value.startLocation) {
+                                            marqueeStart = value.startLocation
+                                        } else {
+                                            return
+                                        }
                                     }
-                                )
+                                    marqueeCurrent = value.location
+                                }
+                                .onEnded { value in
+                                    guard let start = marqueeStart else { return }
+                                    let end = marqueeCurrent ?? value.location
+                                    let rect = CGRect(
+                                        x: min(start.x, end.x),
+                                        y: min(start.y, end.y),
+                                        width: abs(end.x - start.x),
+                                        height: abs(end.y - start.y)
+                                    )
+                                    let hitIDs = cellFrames
+                                        .filter { $0.value.intersects(rect) }
+                                        .map { $0.key }
+                                    if !hitIDs.isEmpty {
+                                        viewModel.replaceSelection(with: hitIDs)
+                                        viewModel.selectionAnchorID = hitIDs.last
+                                    }
+                                    marqueeStart = nil
+                                    marqueeCurrent = nil
+                                }
+                        )
+
+                    // Layer 2: Cells. Layered above the marquee hit area so
+                    // normal clicks land on the cell's button first.
+                    ScrollView {
+                        LazyVGrid(columns: columns, spacing: Self.gridSpacing) {
+                            ForEach(Array(viewModel.filteredPhotoSets.enumerated()), id: \.element.id) { index, photoSet in
+                                cell(for: index, photoSet: photoSet)
+                                    .id(photoSet.id)
+                                    .background(
+                                        GeometryReader { proxy in
+                                            Color.clear
+                                                .preference(
+                                                    key: CellFramePreferenceKey.self,
+                                                    value: [CellFrame(id: photoSet.id, frame: proxy.frame(in: .named("PhotoGrid")))]
+                                                )
+                                        }
+                                    )
+                            }
+                        }
+                        .padding(.horizontal, Self.horizontalPadding)
+                        .padding(.top, Theme.Space.s16)
+                        .padding(.bottom, Theme.Space.s16)
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear
+                                    .onAppear {
+                                        gridOrigin = proxy.frame(in: .named("PhotoGrid")).origin
+                                    }
+                                    .onChange(of: proxy.frame(in: .named("PhotoGrid")).origin) { _, newOrigin in
+                                        gridOrigin = newOrigin
+                                    }
+                            }
+                        )
+                    }
+                    .coordinateSpace(name: "PhotoGrid")
+                    .background(GeometryReader { geometry in
+                        Color.clear.onAppear {
+                            viewModel.gridColumnCount = Self.columnCount(forWidth: geometry.size.width)
+                        }
+                        .onChange(of: geometry.size.width) { _, newWidth in
+                            viewModel.gridColumnCount = Self.columnCount(forWidth: newWidth)
+                        }
+                    })
+                    .onChange(of: viewModel.focusedPhotoIndex) { _, newIndex in
+                        if newIndex >= 0 && newIndex < viewModel.filteredPhotoSets.count {
+                            let targetID = viewModel.filteredPhotoSets[newIndex].id
+                            scrollProxy.scrollTo(targetID)
                         }
                     }
-                    .padding(.horizontal, Self.horizontalPadding)
-                    .padding(.top, Theme.Space.s16)
-                    .padding(.bottom, Theme.Space.s16)
-                    .background(
-                        GeometryReader { proxy in
-                            Color.clear
-                                .onAppear {
-                                    gridOrigin = proxy.frame(in: .named("PhotoGrid")).origin
-                                }
-                                .onChange(of: proxy.frame(in: .named("PhotoGrid")).origin) { _, newOrigin in
-                                    gridOrigin = newOrigin
-                                }
-                        }
-                    )
-                }
-                .coordinateSpace(name: "PhotoGrid")
-                .background(GeometryReader { geometry in
-                    Color.clear.onAppear {
-                        viewModel.gridColumnCount = Self.columnCount(forWidth: geometry.size.width)
-                    }
-                    .onChange(of: geometry.size.width) { _, newWidth in
-                        viewModel.gridColumnCount = Self.columnCount(forWidth: newWidth)
-                    }
-                })
-                .onChange(of: viewModel.focusedPhotoIndex) { _, newIndex in
-                    if newIndex >= 0 && newIndex < viewModel.filteredPhotoSets.count {
-                        let targetID = viewModel.filteredPhotoSets[newIndex].id
-                        scrollProxy.scrollTo(targetID)
-                    }
-                }
 
-                // Layer 3: Marquee rectangle overlay (visual only).
-                if let start = marqueeStart, let current = marqueeCurrent {
-                    let rect = CGRect(
-                        x: min(start.x, current.x),
-                        y: min(start.y, current.y),
-                        width: abs(current.x - start.x),
-                        height: abs(current.y - start.y)
-                    )
-                    Rectangle()
-                        .stroke(Theme.Color.accent, lineWidth: 1)
-                        .background(Rectangle().fill(Theme.Color.accent.opacity(0.12)))
-                        .frame(width: rect.width, height: rect.height)
-                        .offset(x: rect.minX - gridOrigin.x, y: rect.minY - gridOrigin.y)
-                        .allowsHitTesting(false)
+                    // Layer 3: Marquee rectangle overlay (visual only).
+                    if let start = marqueeStart, let current = marqueeCurrent {
+                        let rect = CGRect(
+                            x: min(start.x, current.x),
+                            y: min(start.y, current.y),
+                            width: abs(current.x - start.x),
+                            height: abs(current.y - start.y)
+                        )
+                        Rectangle()
+                            .stroke(Theme.Color.accent, lineWidth: 1)
+                            .background(Rectangle().fill(Theme.Color.accent.opacity(0.12)))
+                            .frame(width: rect.width, height: rect.height)
+                            .offset(x: rect.minX - gridOrigin.x, y: rect.minY - gridOrigin.y)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .onPreferenceChange(CellFramePreferenceKey.self) { values in
+                    var updated = cellFrames
+                    for entry in values {
+                        updated[entry.id] = entry.frame
+                    }
+                    cellFrames = updated
                 }
             }
-            .onPreferenceChange(CellFramePreferenceKey.self) { values in
-                var updated = cellFrames
-                for entry in values {
-                    updated[entry.id] = entry.frame
+            .overlay(alignment: .top) {
+                if viewModel.isScanning {
+                    ProgressView("Scanning subfolders...")
+                        .padding(Theme.Space.s12)
+                        .background(Theme.Color.cellBackground, in: RoundedRectangle(cornerRadius: Theme.Radius.l))
+                        .padding(.top, Theme.Space.s12)
                 }
-                cellFrames = updated
-            }
-        }
-        .overlay(alignment: .top) {
-            if viewModel.isScanning {
-                ProgressView("Scanning subfolders...")
-                    .padding(Theme.Space.s12)
-                    .background(Theme.Color.cellBackground, in: RoundedRectangle(cornerRadius: Theme.Radius.l))
-                    .padding(.top, Theme.Space.s12)
             }
         }
     }

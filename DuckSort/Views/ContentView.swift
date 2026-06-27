@@ -9,9 +9,12 @@ import AppKit
 struct ContentView: View {
     @StateObject private var viewModel = PhotoLibraryViewModel()
     @State private var showOnboarding: Bool = false
+    @State private var showFilterPopover: Bool = false
+    @State private var showTagsPopover: Bool = false
 
     var body: some View {
         MainLayout(viewModel: viewModel)
+            .background(WindowConfigurator())
             .frame(minWidth: 920, minHeight: 640)
             .navigationTitle("DuckSort")
             .toolbar { mainToolbar }
@@ -68,12 +71,31 @@ struct ContentView: View {
             Button {
                 viewModel.addSourceDirectory()
             } label: {
-                Label("Add Source", systemImage: "plus.rectangle.on.folder")
+                Label {
+                    Text("Add Source")
+                } icon: {
+                    Image(systemName: "plus.rectangle.on.folder")
+                        .foregroundStyle(Theme.Color.textSecondary)
+                }
             }
             .help("Add a source folder (⇧⌘O)")
         }
 
         ToolbarItem(placement: .primaryAction) {
+            Button {
+                showFilterPopover.toggle()
+            } label: {
+                Label {
+                    Text("Filters")
+                } icon: {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .foregroundStyle(viewModel.activeFilterCount > 0 && viewModel.isFilterPopoverEnabled ? Theme.Color.accent : Theme.Color.textSecondary)
+                }
+            }
+            .help("Filter Options")
+            .popover(isPresented: $showFilterPopover, arrowEdge: .bottom) {
+                FilterPopoverContent(viewModel: viewModel)
+            }
         }
     }
 
@@ -544,4 +566,21 @@ struct PulsingDropTargetOverlay: View {
                 }
             }
     }
+}
+
+// MARK: - Window Configurator
+struct WindowConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            if let window = view.window {
+                window.titlebarAppearsTransparent = true
+                window.titleVisibility = .hidden
+                window.styleMask.insert(.fullSizeContentView)
+            }
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }

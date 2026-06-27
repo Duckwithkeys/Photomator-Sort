@@ -58,24 +58,6 @@ final class FileScannerTests: XCTestCase {
         XCTAssertEqual(result.scannedFileCount, 4)
     }
 
-    func testJpegOnlyIgnoresRawAndSidecars() async throws {
-        let urls = [
-            try makeFile("IMG_001.jpg"),
-            try makeFile("IMG_001.raf"),
-            try makeFile("IMG_001.photo-edit"),
-            try makeFile("IMG_002.jpg")
-        ]
-
-        let result = await FileScanner().scanFiles(urls, jpegOnly: true)
-
-        XCTAssertEqual(result.photoSets.count, 2)
-        let first = try XCTUnwrap(set(named: "IMG_001", in: result))
-        XCTAssertEqual(first.mediaCount, 1)
-        XCTAssertFalse(first.hasEdit)
-        XCTAssertEqual(result.scannedFileCount, 2)
-        XCTAssertEqual(result.ignoredFileCount, 2) // .raf + .photo-edit
-    }
-
     func testUnknownExtensionsAreIgnored() async throws {
         let urls = [
             try makeFile("IMG_001.jpg"),

@@ -84,7 +84,7 @@ struct LargeImageViewerSidebar: View {
 
                     Divider()
 
-                    // Section 2.5: Caption / Description
+                    // Section 2.6: Caption / Description
                     if let photo = viewModel.currentFocusedPhotoSet {
                         CaptionEditorView(viewModel: viewModel, photoSet: photo)
                     }
@@ -227,11 +227,16 @@ struct LargeImageViewerSidebar: View {
                             )
                         }
                     }
+
+                    Divider()
+
+                    // Section 5: Auto-tag suggestions
+                    AutoTagSuggestionsView(viewModel: viewModel)
                 }
                 .padding(Theme.Space.s14)
             }
         }
-        .frame(width: 260)
+        .frame(width: 290)
         .background(Theme.Color.sidebarBackground)
         .overlay(Divider(), alignment: .leading)
     }

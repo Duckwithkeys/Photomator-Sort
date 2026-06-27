@@ -32,7 +32,7 @@ final class PhotoLibraryViewModel: ObservableObject {
     @Published private(set) var looseFiles: [URL] = []
     @Published private(set) var failedSources: Set<URL> = []
     @Published private(set) var destinationDirectory: URL?
-    @Published private(set) var photoSets: [PhotoSet] = [] {
+    @Published var photoSets: [PhotoSet] = [] {
         didSet {
             rebuildPhotoSetIndex()
             updateGlobalCounts()
@@ -82,6 +82,98 @@ final class PhotoLibraryViewModel: ObservableObject {
             UserPreferences.shared.isInspectorOpen = isInspectorOpen
             UserPreferences.shared.save()
         }
+    }
+
+    // MARK: - Sorting and Filtering State
+    
+    enum SortOrder: String, CaseIterable {
+        case name = "Name"
+        case date = "Date"
+    }
+
+    enum SortDirection: String, CaseIterable {
+        case ascending = "Ascending"
+        case descending = "Descending"
+    }
+
+    enum BinaryFilter: String, CaseIterable {
+        case include = "Include"
+        case exclude = "Exclude"
+    }
+
+    enum RatingCondition: String, CaseIterable {
+        case equalTo = "Equal to"
+        case greaterThanOrEqualTo = "Greater than or equal to"
+        case lessThanOrEqualTo = "Less than or equal to"
+    }
+
+    enum FlagFilter: String, CaseIterable {
+        case all = "All Flags"
+        case flagged = "Flagged"
+        case rejected = "Rejected"
+        case unflagged = "Unflagged"
+    }
+
+    enum NameCondition: String, CaseIterable {
+        case contains = "Contains"
+        case matches = "Matches"
+        case startsWith = "Starts with"
+        case endsWith = "Ends with"
+    }
+
+    @Published var sortOrder: SortOrder = .name {
+        didSet { updateDerivedState() }
+    }
+    @Published var sortDirection: SortDirection = .ascending {
+        didSet { updateDerivedState() }
+    }
+    @Published var isFilterPopoverEnabled: Bool = true {
+        didSet { updateDerivedState() }
+    }
+    @Published var filterEditedActive: Bool = false {
+        didSet { updateDerivedState() }
+    }
+    @Published var filterEdited: BinaryFilter = .include {
+        didSet { updateDerivedState() }
+    }
+    @Published var filterRawActive: Bool = false {
+        didSet { updateDerivedState() }
+    }
+    @Published var filterRaw: BinaryFilter = .include {
+        didSet { updateDerivedState() }
+    }
+    @Published var filterRatingActive: Bool = false {
+        didSet { updateDerivedState() }
+    }
+    @Published var filterRatingValue: Int = 0 {
+        didSet { updateDerivedState() }
+    }
+    @Published var filterRatingCondition: RatingCondition = .equalTo {
+        didSet { updateDerivedState() }
+    }
+    @Published var filterFlagActive: Bool = false {
+        didSet { updateDerivedState() }
+    }
+    @Published var filterFlag: FlagFilter = .all {
+        didSet { updateDerivedState() }
+    }
+    @Published var filterNameActive: Bool = false {
+        didSet { updateDerivedState() }
+    }
+    @Published var nameFilterQuery: String = "" {
+        didSet { updateDerivedState() }
+    }
+    @Published var nameFilterCondition: NameCondition = .contains {
+        didSet { updateDerivedState() }
+    }
+    @Published var filterDateActive: Bool = false {
+        didSet { updateDerivedState() }
+    }
+    @Published var filterStartDate: Date = Date() {
+        didSet { updateDerivedState() }
+    }
+    @Published var filterEndDate: Date = Date() {
+        didSet { updateDerivedState() }
     }
     @Published private(set) var isScanning = false
     @Published private(set) var isTransferring = false
@@ -1143,18 +1235,43 @@ final class PhotoLibraryViewModel: ObservableObject {
     @Published var isSidebarHidden: Bool = false
 
     var activeFilterCount: Int {
-        selectedTagFilters.count
-            + selectedFlags.count
-            + selectedRatings.count
+        var count = selectedTagFilters.count
             + (selectedSubfolderFilter == nil ? 0 : 1)
+        
+        if isFilterPopoverEnabled {
+            if filterEditedActive { count += 1 }
+            if filterRawActive { count += 1 }
+            if filterRatingActive { count += 1 }
+            if filterFlagActive { count += 1 }
+            if filterNameActive && !nameFilterQuery.isEmpty { count += 1 }
+            if filterDateActive { count += 1 }
+        }
+        return count
+    }
+
+    func resetFilterPopover() {
+        filterEditedActive = false
+        filterEdited = .include
+        filterRawActive = false
+        filterRaw = .include
+        filterRatingActive = false
+        filterRatingValue = 0
+        filterRatingCondition = .equalTo
+        filterFlagActive = false
+        filterFlag = .all
+        filterNameActive = false
+        nameFilterQuery = ""
+        nameFilterCondition = .contains
+        filterDateActive = false
+        filterStartDate = Date()
+        filterEndDate = Date()
     }
 
     func clearAllFilters() {
         selectedTagFilters.removeAll()
-        selectedFlags.removeAll()
-        selectedRatings.removeAll()
         selectedSubfolderFilter = nil
         searchText = ""
+        resetFilterPopover()
     }
 
 
@@ -1605,51 +1722,49 @@ final class PhotoLibraryViewModel: ObservableObject {
 
     // MARK: - Count Memoization & Index Clamping
     
+    func photoDate(for photoSet: PhotoSet) -> Date {
+        if let captureDate = photoMetadata[photoSet.id]?.captureDate {
+            return captureDate
+        }
+        if let fileURL = photoSet.mediaFiles.first,
+           let values = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]),
+           let modDate = values.contentModificationDate {
+            return modDate
+        }
+        return Date.distantPast
+    }
+
     func updateDerivedState() {
-        // Hoist all "is this filter active" booleans and any precomputed
-        // values out of the per-photo loop so the inner loop is one tight
-        // sequence of continue/append operations.
         let hasTagFilter = !selectedTagFilters.isEmpty
-        let hasFlagFilter = !selectedFlags.isEmpty
-        let showRejected = selectedFlags.contains(-1)
-        let hasRatingFilter = !selectedRatings.isEmpty
         let subfolderPath = selectedSubfolderFilter?.standardizedFileURL.path
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let hasSearchQuery = !query.isEmpty
+        let textQuery = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let hasSearchQuery = !textQuery.isEmpty
+
+        // Header Name filter
+        let nameQuery = nameFilterQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let hasNameFilter = !nameQuery.isEmpty
+
+        // Date range boundaries
+        let startOfDay = Calendar.current.startOfDay(for: filterStartDate)
+        let endOfDay = Calendar.current.date(byAdding: .day, value: 1, to: filterEndDate)
+            .map { Calendar.current.startOfDay(for: $0) } ?? filterEndDate
 
         var list: [PhotoSet] = []
         list.reserveCapacity(photoSets.count)
 
         for photoSet in photoSets {
-            // Filter rule (the main "library" view selector: All Photos,
-            // Edited, Unedited, etc.)
-            guard filterRule.matches(photoSet) else { continue }
-
-            // Rejected photos are hidden from the default view; they only
-            // reappear when the user explicitly activates the "Rejected"
-            // filter (selectedFlags contains -1).
-            if !showRejected && photoSet.pick == -1 { continue }
-
-            // Tag filter
-            if hasTagFilter {
-                let assigned = tagStore.assignedTagIDs(for: photoSet.id)
-                if selectedTagFilters.isDisjoint(with: assigned) { continue }
+            // Hide rejected photos by default, unless the user specifically filters by Rejected flag
+            let isFilteringRejected = isFilterPopoverEnabled && filterFlagActive && filterFlag == .rejected
+            if !isFilteringRejected && photoSet.pick == -1 {
+                continue
             }
 
-            // Flag filter
-            if hasFlagFilter {
-                if !selectedFlags.contains(photoSet.pick ?? 0) { continue }
+            // Library sidebar filter rule (All / Edited / Unedited)
+            if !filterRule.matches(photoSet) {
+                continue
             }
 
-            // Rating filter
-            if hasRatingFilter {
-                if !selectedRatings.contains(photoSet.rating ?? 0) { continue }
-            }
-
-            // Subfolder filter — match any photo set whose media files
-            // live at or below the selected folder. The sidebar's tree
-            // view lets the user filter by an arbitrary depth in the
-            // hierarchy, so the filter must accept descendant matches too.
+            // 1. Sidebar subfolder filter (if selected)
             if let subfolderPath {
                 var matches = false
                 for fileURL in photoSet.mediaFiles {
@@ -1665,10 +1780,87 @@ final class PhotoLibraryViewModel: ObservableObject {
                 if !matches { continue }
             }
 
-            // Search filter (baseName OR cached caption)
+            // 2. Sidebar Tag Filter (stacks with everything)
+            if hasTagFilter {
+                let assigned = tagStore.assignedTagIDs(for: photoSet.id)
+                if selectedTagFilters.isDisjoint(with: assigned) { continue }
+            }
+
+            // 3. Header: Edited Filter (Include/Exclude)
+            if isFilterPopoverEnabled && filterEditedActive {
+                if filterEdited == .exclude && photoSet.hasEdit {
+                    continue
+                }
+                if filterEdited == .include && !photoSet.hasEdit {
+                    continue
+                }
+            }
+
+            // 4. Header: RAW Filter (Include/Exclude)
+            if isFilterPopoverEnabled && filterRawActive {
+                if filterRaw == .exclude && photoSet.mediaFormats.isRaw {
+                    continue
+                }
+                if filterRaw == .include && !photoSet.mediaFormats.isRaw {
+                    continue
+                }
+            }
+
+            // 5. Header: Rating Filter with condition modifier
+            if isFilterPopoverEnabled && filterRatingActive {
+                let ratingVal = photoSet.rating ?? 0
+                let filterVal = filterRatingValue // 0 is Unrated, 1-5 is stars
+                switch filterRatingCondition {
+                case .equalTo:
+                    if ratingVal != filterVal { continue }
+                case .greaterThanOrEqualTo:
+                    if ratingVal < filterVal { continue }
+                case .lessThanOrEqualTo:
+                    if ratingVal > filterVal { continue }
+                }
+            }
+
+            // 6. Header: Flag Filter
+            if isFilterPopoverEnabled && filterFlagActive {
+                switch filterFlag {
+                case .flagged:
+                    if photoSet.pick != 1 { continue }
+                case .rejected:
+                    if photoSet.pick != -1 { continue }
+                case .unflagged:
+                    if (photoSet.pick ?? 0) != 0 { continue }
+                case .all:
+                    break
+                }
+            }
+
+            // 7. Header: File Name search with conditions
+            if isFilterPopoverEnabled && filterNameActive && hasNameFilter {
+                let baseName = photoSet.baseName.lowercased()
+                switch nameFilterCondition {
+                case .contains:
+                    if !baseName.contains(nameQuery) { continue }
+                case .matches:
+                    if baseName != nameQuery { continue }
+                case .startsWith:
+                    if !baseName.hasPrefix(nameQuery) { continue }
+                case .endsWith:
+                    if !baseName.hasSuffix(nameQuery) { continue }
+                }
+            }
+
+            // 8. Header: Date Range Filter
+            if isFilterPopoverEnabled && filterDateActive {
+                let captureDate = photoDate(for: photoSet)
+                if captureDate < startOfDay || captureDate >= endOfDay {
+                    continue
+                }
+            }
+
+            // 9. Standard search bar filter (caption / baseName)
             if hasSearchQuery {
-                if !photoSet.baseName.lowercased().contains(query),
-                   !(photoCaptions[photoSet.id]?.lowercased().contains(query) ?? false) {
+                if !photoSet.baseName.lowercased().contains(textQuery),
+                   !(photoCaptions[photoSet.id]?.lowercased().contains(textQuery) ?? false) {
                     continue
                 }
             }
@@ -1676,7 +1868,27 @@ final class PhotoLibraryViewModel: ObservableObject {
             list.append(photoSet)
         }
 
-        self.filteredPhotoSets = list
+        // Apply Sorting dynamically based on Top Header rules
+        list.sort { lhs, rhs in
+            let ascending = (sortDirection == .ascending)
+            switch sortOrder {
+            case .name:
+                let result = lhs.baseName.localizedStandardCompare(rhs.baseName)
+                return ascending ? (result == .orderedAscending) : (result == .orderedDescending)
+            case .date:
+                let d1 = photoDate(for: lhs)
+                let d2 = photoDate(for: rhs)
+                if d1 == d2 {
+                    return lhs.baseName.localizedStandardCompare(rhs.baseName) == .orderedAscending
+                }
+                return ascending ? (d1 < d2) : (d1 > d2)
+            }
+        }
+
+        // Reshuffle grid animates automatically via SwiftUI spring transition
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+            self.filteredPhotoSets = list
+        }
 
         // Clamp focusedPhotoIndex first to valid range of filteredPhotoSets
         let clamped: Int
@@ -1809,8 +2021,7 @@ final class PhotoLibraryViewModel: ObservableObject {
     /// have to reconstruct URL objects every time the sidebar re-renders.
     private func rebuildFolderIndex(from photoSetsBySubfolder: [URL: Set<UUID>]) {
         // Map: parent path -> set of child folder paths observed via
-        // `photoSets`. Walking each set's parent dir and comparing to
-        // every ancestor gives us the full tree in one pass.
+        // `photoSets`.
         var childAccum: [String: Set<String>] = [:]
         var photoCountByPath: [String: Int] = [:]
         childAccum.reserveCapacity(photoSetsBySubfolder.count * 2)
@@ -1820,21 +2031,26 @@ final class PhotoLibraryViewModel: ObservableObject {
             let folderPath = folder.path
             photoCountByPath[folderPath, default: 0] += sets.count
 
-            // For each ancestor path (folder itself + every parent
-            // up to "/"), register this folder as a child. Bail when we
-            // hit the root.
-            var ancestor = folder.deletingLastPathComponent()
+            // Walk up ancestors to build recursive counts and parent-child relations
+            var current = folder
             let rootURL = URL(fileURLWithPath: "/")
-            while ancestor.path != "/" && ancestor.path != rootURL.path {
-                let ancestorPath = ancestor.path
-                var bucket = childAccum[ancestorPath, default: Set()]
-                if bucket.insert(folderPath).inserted {
-                    childAccum[ancestorPath] = bucket
+            while current.path != "/" && current.path != rootURL.path {
+                let parent = current.deletingLastPathComponent()
+                let parentPath = parent.path
+                
+                // Only register child under its immediate parent
+                if parentPath != "/" && parentPath != rootURL.path {
+                    var bucket = childAccum[parentPath, default: Set()]
+                    bucket.insert(current.path)
+                    childAccum[parentPath] = bucket
                 }
-                // Count this folder's sets under each ancestor too — that's
-                // what makes `recursivePhotoCount(in:)` work in O(1).
-                photoCountByPath[ancestorPath, default: 0] += sets.count
-                ancestor = ancestor.deletingLastPathComponent()
+                
+                // Accumulate counts for all ancestors
+                if current != folder {
+                    photoCountByPath[current.path, default: 0] += sets.count
+                }
+                
+                current = parent
             }
         }
 
@@ -1854,6 +2070,7 @@ final class PhotoLibraryViewModel: ObservableObject {
         self.recursivePhotoCountIndex = photoCountByPath
         self.childFolderURLs = childURLs
     }
+
     
     func relativePath(of subfolderURL: URL, relativeTo sourceURL: URL) -> String {
         let sourcePath = sourceURL.standardizedFileURL.path

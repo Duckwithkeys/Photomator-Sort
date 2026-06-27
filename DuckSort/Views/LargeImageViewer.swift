@@ -2,6 +2,9 @@
 //  LargeImageViewer.swift
 //  DuckSort
 //
+//  Large image viewer overlay containing filmstrip navigation, left inspector panel,
+//  and right sidebar. Reverted layout to original structure under a full-width topBar.
+//
 
 import SwiftUI
 import AppKit
@@ -47,6 +50,8 @@ struct LargeImageViewer: View {
             .animation(.spring(response: 0.3, dampingFraction: 0.85), value: viewModel.isInspectorOpen)
         }
     }
+
+    // MARK: - Component Views
 
     @ViewBuilder
     private var imagePane: some View {

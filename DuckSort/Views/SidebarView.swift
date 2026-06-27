@@ -7,55 +7,34 @@ import SwiftUI
 
 struct SidebarView: View {
     @ObservedObject var viewModel: PhotoLibraryViewModel
-    @FocusState private var isSearchFocused: Bool
+    @State private var expandedFolderPaths: Set<String> = []
+    @State private var isTagsExpanded: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
-            // Search
-            HStack(spacing: Theme.Space.s6) {
-                Image(systemName: "magnifyingglass")
-                    .font(Theme.Font.caption)
-                    .foregroundStyle(Theme.Color.textSecondary)
-                TextField("Search files…", text: $viewModel.searchText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.Color.textPrimary)
-                    .focused($isSearchFocused)
-                if !viewModel.searchText.isEmpty {
-                    Button {
-                        viewModel.searchText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(Theme.Font.caption)
-                            .foregroundStyle(Theme.Color.textSecondary)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, Theme.Space.s8)
-            .padding(.vertical, Theme.Space.s4)
-            .background(Theme.Color.cellBackground, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.m)
-                    .stroke(Theme.Color.separator, lineWidth: Theme.Stroke.hairline)
-            )
-            .padding(.horizontal, Theme.Space.s16)
-            .padding(.bottom, Theme.Space.s8)
-
             // Permanent filter bar — stays put so it doesn't shift the
             // rest of the sidebar when the user picks or clears filters.
             // Greys out when no filters are active.
-            ActiveFiltersBar(
-                count: viewModel.activeFilterCount,
-                isEmpty: viewModel.activeFilterCount == 0,
-                onClear: viewModel.clearAllFilters
+            ActiveTagsBar(
+                count: viewModel.selectedTagFilters.count,
+                isEmpty: viewModel.selectedTagFilters.isEmpty,
+                isExpanded: $isTagsExpanded,
+                onClear: {
+                    withAnimation(.smooth(duration: 0.15)) {
+                        viewModel.selectedTagFilters.removeAll()
+                    }
+                }
             )
             .padding(.horizontal, Theme.Space.s16)
+            .padding(.top, Theme.Space.s16)
             .padding(.bottom, Theme.Space.s8)
 
             List {
+                if isTagsExpanded {
+                    ActiveTagsDetailSectionView(viewModel: viewModel)
+                }
                 LibrarySectionView(viewModel: viewModel)
-                SourcesSectionView(viewModel: viewModel)
+                SourcesSectionView(viewModel: viewModel, expandedFolderPaths: $expandedFolderPaths)
                 TagsSectionView(viewModel: viewModel)
             }
             .listStyle(.sidebar)
@@ -63,15 +42,6 @@ struct SidebarView: View {
         }
         .frame(minWidth: 220, idealWidth: 240, maxWidth: 280)
         .background(Theme.Color.sidebarBackground)
-        .onAppear {
-            // Don't let the first responder auto-grab the search field;
-            // keyboard shortcuts in the grid should work without the user
-            // having to click out of the field first.
-            isSearchFocused = false
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                isSearchFocused = false
-            }
-        }
     }
 
     private var brandBar: some View {
@@ -94,67 +64,12 @@ struct SidebarView: View {
     }
 }
 
-// MARK: - Library Section View
-
-struct LibrarySectionView: View {
-    @ObservedObject var viewModel: PhotoLibraryViewModel
-    @State private var hoveredRule: PhotoFilterRule? = nil
-
-    var body: some View {
-        Section("LIBRARY") {
-            ForEach(PhotoFilterRule.allCases) { rule in
-                Button {
-                    viewModel.filterRule = rule
-                } label: {
-                    HStack {
-                        Image(systemName: rule.systemImage)
-                            .foregroundStyle(viewModel.filterRule == rule ? Theme.Color.accent : Theme.Color.textSecondary)
-                            .frame(width: 16)
-                        Text(rule.rawValue)
-                            .foregroundStyle(Theme.Color.textPrimary)
-                        Spacer()
-                        let count = count(for: rule)
-                        if count > 0 {
-                            Text("\(count)")
-                                .font(Theme.Font.caption)
-                                .foregroundStyle(Theme.Color.textSecondary)
-                        }
-                    }
-                    .padding(.vertical, Theme.Space.s4)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .onHover { hovering in
-                    withAnimation(.easeInOut(duration: 0.12)) {
-                        hoveredRule = hovering ? rule : nil
-                    }
-                }
-                .listRowBackground(
-                    RoundedRectangle(cornerRadius: Theme.Radius.m)
-                        .fill(
-                            viewModel.filterRule == rule
-                            ? Theme.Color.rowSelectedFill
-                            : (hoveredRule == rule ? Theme.Color.rowHoverFill : Color.clear)
-                        )
-                        .padding(.horizontal, Theme.Space.s8)
-                )
-            }
-        }
-    }
-
-    private func count(for rule: PhotoFilterRule) -> Int {
-        switch rule {
-        case .allPhotos:   return viewModel.cachedAllPhotosCount
-        case .editedOnly:  return viewModel.cachedEditedCount
-        case .uneditedOnly: return viewModel.cachedUneditedCount
-        }
-    }
-}
 
 // MARK: - Sources Section View
 
 struct SourcesSectionView: View {
     @ObservedObject var viewModel: PhotoLibraryViewModel
+    @Binding var expandedFolderPaths: Set<String>
 
     var body: some View {
         Section("SOURCES") {
@@ -164,7 +79,8 @@ struct SourcesSectionView: View {
                     folder: url,
                     parentSource: url,
                     depth: 0,
-                    isRoot: true
+                    isRoot: true,
+                    expandedFolderPaths: $expandedFolderPaths
                 )
             }
 
@@ -204,67 +120,11 @@ struct SourcesSectionView: View {
 struct TagsSectionView: View {
     @ObservedObject var viewModel: PhotoLibraryViewModel
     @State private var hoveredTagID: UUID? = nil
-    @State private var isFlagsExpanded = true
-    @State private var isFlagsHovered = false
     @State private var expandedCategoryIDs: Set<UUID> = []
     @State private var hoveredCategoryID: UUID? = nil
 
     var body: some View {
         Section("TAGS") {
-            DisclosureGroup(isExpanded: $isFlagsExpanded) {
-                SystemFilterRow(
-                    name: "Flagged",
-                    systemImage: "flag.fill",
-                    iconColor: Theme.Color.textInverse,
-                    isSelected: viewModel.selectedFlags.contains(1),
-                    count: viewModel.cachedFlagCounts[1] ?? 0,
-                    action: { viewModel.toggleFlagFilter(1) }
-                )
-                SystemFilterRow(
-                    name: "Rejected",
-                    systemImage: "flag.slash.fill",
-                    iconColor: Theme.Color.danger,
-                    isSelected: viewModel.selectedFlags.contains(-1),
-                    count: viewModel.cachedFlagCounts[-1] ?? 0,
-                    action: { viewModel.toggleFlagFilter(-1) }
-                )
-                SystemFilterRow(
-                    name: "Unrated",
-                    systemImage: "star.slash",
-                    iconColor: Theme.Color.textTertiary,
-                    isSelected: viewModel.selectedRatings.contains(0),
-                    count: viewModel.cachedRatingCounts[0] ?? 0,
-                    action: { viewModel.toggleRatingFilter(0) }
-                )
-                ForEach((1...5).reversed(), id: \.self) { rating in
-                    SystemFilterRow(
-                        name: "\(rating) Star\(rating == 1 ? "" : "s")",
-                        systemImage: "star.fill",
-                        iconColor: Theme.Color.rating,
-                        isSelected: viewModel.selectedRatings.contains(rating),
-                        count: viewModel.cachedRatingCounts[rating] ?? 0,
-                        action: { viewModel.toggleRatingFilter(rating) }
-                    )
-                }
-            } label: {
-                HStack {
-                    Text("Flags & Ratings")
-                        .font(Theme.Font.subheadline)
-                        .foregroundStyle(Theme.Color.textPrimary)
-                    Spacer()
-                }
-                .contentShape(Rectangle())
-                .onTapGesture { isFlagsExpanded.toggle() }
-                .onHover { hovering in
-                    withAnimation(.easeInOut(duration: 0.12)) { isFlagsHovered = hovering }
-                }
-            }
-            .tint(Theme.Color.textSecondary)
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: Theme.Radius.m)
-                    .fill(isFlagsHovered ? Theme.Color.rowHoverFill : Color.clear)
-                    .padding(.horizontal, Theme.Space.s8)
-            )
 
             if viewModel.tagStore.tags.isEmpty {
                 Text("No tags")
@@ -358,6 +218,8 @@ struct TagsSectionView: View {
         }
     }
 }
+
+
 
 // MARK: - Component Row Views
 
@@ -470,23 +332,39 @@ struct SystemFilterRow: View {
 
 // MARK: - Custom Section / Subfolder Rows
 
-// Recursive tree node for a folder under a source. The root node (a
-// source itself) gets a slightly different visual treatment (chevron
-// rotates, "Remove" replaces "Reveal"); deeper nodes reuse the same
-// row template but with a leading indent that grows with `depth`.
-//
-// Each node lazily computes its children only when expanded, so the
-// sidebar stays responsive even with deeply nested photo libraries.
-// Children themselves are recursive `FolderTreeNode` views — there's no
-// arbitrary depth limit.
+private func iconNameForFolder(_ folder: URL) -> String {
+    let name = folder.lastPathComponent.lowercased()
+    if name == "documents" { return "doc.folder.fill" }
+    if name == "downloads" { return "arrow.down.folder.fill" }
+    if name == "desktop" { return "desktopcomputer" }
+    if name.contains("archive") { return "archivebox.fill" }
+    if name.contains("creative") { return "paintpalette.fill" }
+    if name.contains("media") || name.contains("pictures") || name.contains("photos") { return "photo.on.rectangle.fill" }
+    if name.contains("project") { return "shippingbox.fill" }
+    if name.contains("graph") { return "chart.bar.fill" }
+    if name.contains("permaculture") || name.contains("garden") { return "leaf.fill" }
+    return "folder.fill"
+}
+
+private func iconColorForFolder(_ folder: URL) -> Color {
+    let name = folder.lastPathComponent.lowercased()
+    if name == "documents" || name == "downloads" || name == "desktop" {
+        return Color.blue
+    }
+    if name.contains("archive") || name.contains("creative") || name.contains("media") || name.contains("pictures") || name.contains("photos") || name.contains("project") || name.contains("graph") || name.contains("permaculture") || name.contains("garden") {
+        return Theme.Color.textSecondary
+    }
+    return Color.blue // Default standard folder is blue
+}
+
 struct FolderTreeNode: View {
     @ObservedObject var viewModel: PhotoLibraryViewModel
     let folder: URL
     let parentSource: URL
     let depth: Int
     let isRoot: Bool
+    @Binding var expandedFolderPaths: Set<String>
 
-    @State private var isExpanded: Bool = false
     @State private var isHovered: Bool = false
 
     /// Subfolder children are computed once on first expansion, then cached
@@ -511,17 +389,44 @@ struct FolderTreeNode: View {
                 && activePath[folderPath.endIndex] == "/")
     }
 
+    private var isSelected: Bool {
+        guard let active = viewModel.selectedSubfolderFilter else { return false }
+        return active.standardizedFileURL.path == folder.standardizedFileURL.path
+    }
+
     private var displayName: String {
         if isRoot { return folder.lastPathComponent.isEmpty ? folder.path : folder.lastPathComponent }
-        return viewModel.relativePath(of: folder, relativeTo: parentSource)
+        return folder.lastPathComponent
     }
 
     private var photoCount: Int { viewModel.recursivePhotoCount(in: folder) }
 
+    private var isExpanded: Binding<Bool> {
+        Binding(
+            get: { expandedFolderPaths.contains(folder.path) },
+            set: { expand in
+                if expand {
+                    ensureChildrenLoaded()
+                    expandedFolderPaths.insert(folder.path)
+                } else {
+                    expandedFolderPaths.remove(folder.path)
+                }
+            }
+        )
+    }
+
+    private func ensureChildrenLoaded() {
+        if cachedChildren == nil {
+            cachedChildren = viewModel.childSubfolders(of: folder)
+        }
+        if cachedPhotos == nil {
+            cachedPhotos = viewModel.photoSetsDirectlyIn(folder: folder)
+        }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            row
-            if isExpanded {
+        if canExpand {
+            DisclosureGroup(isExpanded: isExpanded) {
                 // Render child subfolders.
                 if let children = cachedChildren, !children.isEmpty {
                     ForEach(children, id: \.self) { child in
@@ -530,7 +435,8 @@ struct FolderTreeNode: View {
                             folder: child,
                             parentSource: parentSource,
                             depth: depth + 1,
-                            isRoot: false
+                            isRoot: false,
+                            expandedFolderPaths: $expandedFolderPaths
                         )
                     }
                 }
@@ -546,124 +452,112 @@ struct FolderTreeNode: View {
                         )
                     }
                 }
+            } label: {
+                row
             }
+            .tint(Theme.Color.textSecondary)
+            .onAppear {
+                if expandedFolderPaths.contains(folder.path) {
+                    ensureChildrenLoaded()
+                }
+            }
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: Theme.Radius.m)
+                    .fill(isSelected
+                          ? Theme.Color.rowSelectedFill
+                          : (isHovered ? Theme.Color.rowHoverFill : Color.clear))
+                    .padding(.horizontal, Theme.Space.s8)
+            )
+        } else {
+            row
+                .listRowBackground(
+                    RoundedRectangle(cornerRadius: Theme.Radius.m)
+                        .fill(isSelected
+                              ? Theme.Color.rowSelectedFill
+                              : (isHovered ? Theme.Color.rowHoverFill : Color.clear))
+                        .padding(.horizontal, Theme.Space.s8)
+                )
         }
     }
 
     private var row: some View {
-        HStack(spacing: 0) {
-            // Depth-based indent applied to the entire row so the
-            // disclosure triangle and folder content move together.
-            Spacer().frame(width: CGFloat(depth) * Theme.Space.s12)
+        HStack(spacing: Theme.Space.s6) {
+            let iconName = iconNameForFolder(folder)
+            let iconColor = iconColorForFolder(folder)
 
-            // Clickable disclosure triangle on the left of the row.
-            // Clicking it expands/collapses the subtree without applying
-            // the filter, so the user can browse without losing their
-            // current grid view.
-            Button(action: toggleExpansion) {
-                HStack(spacing: 2) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(Theme.Color.textTertiary)
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                        .opacity(canExpand ? 1 : 0)
-                        .animation(.easeInOut(duration: 0.12), value: isExpanded)
-                }
-                .frame(width: 18, height: 22)
-                .contentShape(Rectangle())
+            Image(systemName: hasFailed ? "exclamationmark.triangle.fill" : iconName)
+                .foregroundStyle(hasFailed ? Theme.Color.danger
+                                           : (isSubtreeSelected ? Theme.Color.accent : iconColor))
+                .font(.system(size: isRoot ? 14 : 12))
+                .frame(width: 16)
+
+            Text(displayName)
+                .font(isRoot ? Theme.Font.subheadline : Theme.Font.caption)
+                .foregroundStyle(hasFailed ? Theme.Color.danger
+                                           : Theme.Color.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            if hasFailed {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.Color.danger)
+                    .help("Failed to read this source")
             }
-            .buttonStyle(.plain)
-            .help(canExpand
-                  ? (isExpanded ? "Collapse" : "Expand")
-                  : "Empty folder")
 
-            // Main row click → filter the grid to this subtree.
-            Button(action: toggleSelection) {
+            Spacer(minLength: 4)
+
+            if photoCount > 0 {
+                Text("\(photoCount)")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(isSubtreeSelected ? Theme.Color.accent
+                                                      : Theme.Color.textSecondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule().fill(
+                            isSubtreeSelected
+                            ? Theme.Color.accent.opacity(0.18)
+                            : Theme.Color.overlaySoft
+                        )
+                    )
+            }
+
+            if isHovered {
                 HStack(spacing: Theme.Space.s6) {
-                    Image(systemName: hasFailed ? "exclamationmark.triangle.fill"
-                                               : (isRoot ? "folder.fill" : "folder"))
-                        .foregroundStyle(hasFailed ? Theme.Color.danger
-                                                  : (isSubtreeSelected ? Theme.Color.accent
-                                                                       : Theme.Color.textSecondary))
-                        .font(.system(size: isRoot ? 14 : 12))
-                        .frame(width: 16)
-
-                    Text(displayName)
-                        .font(isRoot ? Theme.Font.subheadline : Theme.Font.caption)
-                        .foregroundStyle(hasFailed ? Theme.Color.danger
-                                                  : Theme.Color.textPrimary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-
-                    if hasFailed {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.Color.danger)
-                            .help("Failed to read this source")
+                    Button {
+                        NSWorkspace.shared.activateFileViewerSelecting([folder])
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Color.textSecondary)
                     }
+                    .buttonStyle(.plain)
+                    .help("Reveal in Finder")
 
-                    Spacer(minLength: 4)
-
-                    if photoCount > 0 {
-                        Text("\(photoCount)")
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .foregroundStyle(isSubtreeSelected ? Theme.Color.accent
-                                                              : Theme.Color.textSecondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(
-                                Capsule().fill(
-                                    isSubtreeSelected
-                                    ? Theme.Color.accent.opacity(0.18)
-                                    : Theme.Color.overlaySoft
-                                )
-                            )
-                    }
-
-                    if isHovered {
-                        HStack(spacing: Theme.Space.s6) {
-                            Button {
-                                NSWorkspace.shared.activateFileViewerSelecting([folder])
-                            } label: {
-                                Image(systemName: "magnifyingglass")
-                                    .font(Theme.Font.caption)
-                                    .foregroundStyle(Theme.Color.textSecondary)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Reveal in Finder")
-
-                            if isRoot {
-                                Button {
-                                    viewModel.removeSourceDirectory(folder)
-                                } label: {
-                                    Image(systemName: "xmark.circle")
-                                        .font(Theme.Font.caption)
-                                        .foregroundStyle(Theme.Color.textSecondary)
-                                }
-                                .buttonStyle(.plain)
-                                .help("Remove source folder")
-                            }
+                    if isRoot {
+                        Button {
+                            viewModel.removeSourceDirectory(folder)
+                        } label: {
+                            Image(systemName: "xmark.circle")
+                                .font(Theme.Font.caption)
+                                .foregroundStyle(Theme.Color.textSecondary)
                         }
+                        .buttonStyle(.plain)
+                        .help("Remove source folder")
                     }
                 }
-                .padding(.leading, Theme.Space.s4)
-                .padding(.trailing, Theme.Space.s10)
-                .padding(.vertical, Theme.Space.s4)
-                .contentShape(Rectangle())
-                .background(
-                    // Highlight the entire subtree when the user is
-                    // filtering by it.
-                    RoundedRectangle(cornerRadius: Theme.Radius.m)
-                        .fill(isSubtreeSelected
-                              ? Theme.Color.rowSelectedFill
-                              : (isHovered ? Theme.Color.rowHoverFill : Color.clear))
-                        .padding(.horizontal, Theme.Space.s4)
-                )
             }
-            .buttonStyle(.plain)
         }
+        .padding(.leading, isRoot ? 2 : 0)
+        .padding(.trailing, Theme.Space.s10)
+        .padding(.vertical, Theme.Space.s4)
+        .contentShape(Rectangle())
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.12)) { isHovered = hovering }
+        }
+        .onTapGesture {
+            toggleSelection()
         }
         .contextMenu {
             Button(isSubtreeSelected ? "Clear Filter" : "Filter to This Folder") {
@@ -673,12 +567,6 @@ struct FolderTreeNode: View {
             Button("Reveal in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([folder])
             }
-            if canExpand {
-                Button(isExpanded ? "Collapse" : "Expand") {
-                    toggleExpansion()
-                }
-                Divider()
-            }
             if isRoot {
                 Button("Remove Source Folder") {
                     viewModel.removeSourceDirectory(folder)
@@ -687,9 +575,6 @@ struct FolderTreeNode: View {
         }
     }
 
-    /// True if this folder contains any photo sets directly (not in
-    /// subfolders). Used to show the disclosure triangle when a folder
-    /// has photos at the leaf level.
     private var hasDirectPhotos: Bool {
         if let cached = cachedPhotos {
             return !cached.isEmpty
@@ -699,19 +584,7 @@ struct FolderTreeNode: View {
 
     private var canExpand: Bool {
         if let cached = cachedChildren { return !cached.isEmpty }
-        // We haven't computed children yet — assume yes if there's at
-        // least one photo in the subtree (any deeper folder must be
-        // photo-bearing to exist), or if this folder directly contains
-        // photos that can be shown as leaf nodes.
         return photoCount > 0 || hasDirectPhotos
-    }
-
-    /// True when this folder has at least one direct photo (leaf node).
-    private var hasLeafPhotos: Bool {
-        if let cached = cachedPhotos {
-            return !cached.isEmpty
-        }
-        return hasDirectPhotos
     }
 
     private func toggleSelection() {
@@ -721,27 +594,8 @@ struct FolderTreeNode: View {
             viewModel.selectedSubfolderFilter = folder
         }
     }
-
-    private func toggleExpansion() {
-        guard canExpand else { return }
-        if cachedChildren == nil {
-            cachedChildren = viewModel.childSubfolders(of: folder)
-        }
-        // Also load direct photo sets when expanding.
-        if cachedPhotos == nil {
-            cachedPhotos = viewModel.photoSetsDirectlyIn(folder: folder)
-        }
-        withAnimation(.easeInOut(duration: 0.12)) {
-            isExpanded.toggle()
-        }
-    }
 }
 
-// MARK: - Photo Leaf Node
-
-/// A leaf node rendered inside an expanded `FolderTreeNode`. Shows
-/// individual photo sets that live directly in this folder (not in
-/// subfolders). Clicking filters the grid to that single photo.
 struct PhotoLeafNode: View {
     @ObservedObject var viewModel: PhotoLibraryViewModel
     let photoSet: PhotoSet
@@ -749,49 +603,37 @@ struct PhotoLeafNode: View {
     let parentSource: URL
     let depth: Int
 
-    private var isSelected: Bool {
-        guard let active = viewModel.selectedSubfolderFilter else { return false }
-        let activePath = active.standardizedFileURL.path
-        let folderPath = parentFolder.standardizedFileURL.path
-        return activePath == folderPath
-            || (activePath.count > folderPath.count
-                && activePath.hasPrefix(folderPath)
-                && activePath[folderPath.endIndex] == "/")
+    @State private var isHovered = false
+
+    private var isFocused: Bool {
+        viewModel.filteredPhotoSets.indices.contains(viewModel.focusedPhotoIndex) &&
+        viewModel.filteredPhotoSets[viewModel.focusedPhotoIndex].id == photoSet.id
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            Spacer().frame(width: CGFloat(depth) * Theme.Space.s12)
-            // Camera icon with format badge.
+        HStack(spacing: Theme.Space.s6) {
             Image(systemName: "camera.fill")
                 .font(.system(size: 11, weight: .light))
                 .foregroundStyle(
-                    colorForFormat(photoSet.formatLabel)
-                        .opacity(0.7)
+                    isFocused ? Theme.Color.accent :
+                    colorForFormat(photoSet.formatLabel).opacity(0.7)
                 )
-                .frame(width: 18, height: 22)
-                .contentShape(Rectangle())
+                .frame(width: 16, height: 22)
 
-            // Photo name (base name of the first file).
-            Button(action: selectPhoto) {
-                Text(photoSet.displayName)
-                    .font(Theme.Font.body)
-                    .foregroundStyle(isSelected ? Theme.Color.accent : Theme.Color.textSecondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .buttonStyle(.plain)
-            .help("Filter grid to: \(photoSet.displayName)")
+            Text(photoSet.displayName)
+                .font(Theme.Font.body)
+                .foregroundStyle(isFocused ? Theme.Color.accent : Theme.Color.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
 
             Spacer()
 
-            // Format badge (RAW, JPEG, HEIF).
             if !photoSet.formatLabel.isEmpty {
                 Text(photoSet.formatLabel)
                     .font(Theme.Font.caption2)
                     .foregroundStyle(
-                        colorForFormat(photoSet.formatLabel)
-                            .opacity(0.85)
+                        isFocused ? Theme.Color.accent :
+                        colorForFormat(photoSet.formatLabel).opacity(0.85)
                     )
                     .padding(.horizontal, 4)
                     .padding(.vertical, 1)
@@ -799,7 +641,6 @@ struct PhotoLeafNode: View {
                     .clipShape(RoundedRectangle(cornerRadius: 2))
             }
 
-            // Photo count (if the set has multiple files).
             if photoSet.mediaFiles.count > 1 {
                 Text("×\(photoSet.mediaFiles.count)")
                     .font(Theme.Font.caption2)
@@ -809,17 +650,31 @@ struct PhotoLeafNode: View {
         }
         .frame(height: 22)
         .padding(.leading, Theme.Space.s4)
+        .padding(.trailing, Theme.Space.s10)
+        .padding(.vertical, Theme.Space.s4)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.12)) { isHovered = hovering }
+        }
+        .onTapGesture {
+            selectPhoto()
+        }
+        .listRowBackground(
+            RoundedRectangle(cornerRadius: Theme.Radius.m)
+                .fill(isFocused
+                      ? Theme.Color.rowSelectedFill
+                      : (isHovered ? Theme.Color.rowHoverFill : Color.clear))
+                .padding(.horizontal, Theme.Space.s8)
+        )
     }
 
     private func selectPhoto() {
         viewModel.selectedSubfolderFilter = parentFolder
-        // Set the focused photo index so the main view shows this photo.
         if let idx = viewModel.filteredPhotoSets.firstIndex(where: { $0.id == photoSet.id }) {
             viewModel.focusedPhotoIndex = idx
         }
     }
 
-    /// Returns the Theme.FileColor matching the format label.
     private func colorForFormat(_ label: String) -> Color {
         let upper = label.uppercased()
         if upper.contains("JPEG") { return Theme.Color.FileColor.jpeg }
@@ -829,28 +684,42 @@ struct PhotoLeafNode: View {
     }
 }
 
-// MARK: - Active Filters Bar
 
-struct ActiveFiltersBar: View {
+// MARK: - Active Tags Bar
+
+struct ActiveTagsBar: View {
     let count: Int
     let isEmpty: Bool
+    @Binding var isExpanded: Bool
     let onClear: () -> Void
     @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: Theme.Space.s6) {
-            Image(systemName: isEmpty
-                  ? "line.3.horizontal.decrease.circle"
-                  : "line.3.horizontal.decrease.circle.fill")
-                .foregroundStyle(isEmpty ? Theme.Color.textTertiary : Theme.Color.accent)
-                .font(Theme.Font.subheadline)
+            HStack(spacing: Theme.Space.s6) {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Theme.Color.textSecondary)
 
-            Text(isEmpty
-                 ? "No active filters"
-                 : "^[\(count) active filter](inflect: true)")
-                .font(Theme.Font.caption)
-                .foregroundStyle(isEmpty ? Theme.Color.textTertiary : Theme.Color.textPrimary)
-                .lineLimit(1)
+                Image(systemName: isEmpty
+                      ? "tag"
+                      : "tag.fill")
+                    .foregroundStyle(isEmpty ? Theme.Color.textTertiary : Theme.Color.accent)
+                    .font(Theme.Font.subheadline)
+
+                Text(isEmpty
+                     ? "No active tags"
+                     : "^[\(count) active tag](inflect: true)")
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(isEmpty ? Theme.Color.textTertiary : Theme.Color.textPrimary)
+                    .lineLimit(1)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.smooth(duration: 0.2)) {
+                    isExpanded.toggle()
+                }
+            }
 
             Spacer(minLength: Theme.Space.s4)
 
@@ -870,8 +739,8 @@ struct ActiveFiltersBar: View {
             .buttonStyle(.plain)
             .disabled(isEmpty)
             .help(isEmpty
-                  ? "Pick a tag, rating, or flag in the list below to filter the grid."
-                  : "Clear all filters and search")
+                  ? "Select a tag in the list below to filter the grid."
+                  : "Clear all active tag filters")
         }
         .padding(.horizontal, Theme.Space.s8)
         .padding(.vertical, Theme.Space.s4)
@@ -892,6 +761,136 @@ struct ActiveFiltersBar: View {
         )
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.12)) { isHovered = hovering }
+        }
+    }
+}
+
+// MARK: - Library Section View
+
+struct LibrarySectionView: View {
+    @ObservedObject var viewModel: PhotoLibraryViewModel
+    @State private var hoveredRule: PhotoFilterRule? = nil
+
+    var body: some View {
+        Section("LIBRARY") {
+            ForEach(PhotoFilterRule.allCases) { rule in
+                Button {
+                    viewModel.filterRule = rule
+                    NSApp.keyWindow?.makeFirstResponder(nil)
+                } label: {
+                    HStack {
+                        Image(systemName: rule.systemImage)
+                            .foregroundStyle(viewModel.filterRule == rule ? Theme.Color.accent : Theme.Color.textSecondary)
+                            .frame(width: 16)
+                        Text(rule.rawValue)
+                            .foregroundStyle(Theme.Color.textPrimary)
+                        Spacer()
+                        // Count badge
+                        let count = count(for: rule)
+                        if count > 0 {
+                            Text("\(count)")
+                                .font(Theme.Font.caption)
+                                .foregroundStyle(Theme.Color.textSecondary)
+                        }
+                    }
+                    .padding(.vertical, Theme.Space.s4)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .onHover { hovering in
+                    withAnimation(.easeInOut(duration: 0.12)) {
+                        hoveredRule = hovering ? rule : nil
+                    }
+                }
+                .listRowBackground(
+                    RoundedRectangle(cornerRadius: Theme.Radius.m)
+                        .fill(
+                            viewModel.filterRule == rule
+                            ? Theme.Color.rowSelectedFill
+                            : (hoveredRule == rule ? Theme.Color.rowHoverFill : Color.clear)
+                        )
+                        .padding(.horizontal, Theme.Space.s8)
+                )
+            }
+        }
+    }
+
+    private func count(for rule: PhotoFilterRule) -> Int {
+        switch rule {
+        case .allPhotos:
+            return viewModel.cachedAllPhotosCount
+        case .editedOnly:
+            return viewModel.cachedEditedCount
+        case .uneditedOnly:
+            return viewModel.cachedUneditedCount
+        }
+    }
+}
+
+// MARK: - Active Tags Detail Section View
+
+struct ActiveTagsDetailSectionView: View {
+    @ObservedObject var viewModel: PhotoLibraryViewModel
+    @State private var hoveredTagID: UUID? = nil
+
+    var body: some View {
+        let activeTags = viewModel.tagStore.tags.filter { viewModel.selectedTagFilters.contains($0.id) }
+        
+        Section("ACTIVE TAGS") {
+            if activeTags.isEmpty {
+                Text("No active tags")
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Color.textTertiary)
+                    .listRowBackground(Color.clear)
+            } else {
+                ForEach(activeTags) { tag in
+                    Button {
+                        _ = withAnimation(.smooth(duration: 0.15)) {
+                            viewModel.selectedTagFilters.remove(tag.id)
+                        }
+                    } label: {
+                        HStack(spacing: Theme.Space.s8) {
+                            // Checkbox
+                            Image(systemName: "checkmark.square.fill")
+                                .font(.system(size: 13))
+                                .foregroundStyle(Theme.Color.accent)
+
+                            // Tag color indicator
+                            Circle()
+                                .fill(tag.color)
+                                .frame(width: 8, height: 8)
+
+                            // Tag Name
+                            Text(tag.name)
+                                .font(Theme.Font.body)
+                                .foregroundStyle(Theme.Color.textPrimary)
+
+                            Spacer()
+
+                            // Count of photos with this tag
+                            let count = viewModel.cachedTagCounts[tag.id] ?? 0
+                            if count > 0 {
+                                Text("\(count)")
+                                    .font(Theme.Font.caption)
+                                    .foregroundStyle(Theme.Color.textSecondary)
+                            }
+                        }
+                        .padding(.vertical, Theme.Space.s4)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { hovering in
+                        withAnimation(.easeInOut(duration: 0.12)) {
+                            hoveredTagID = hovering ? tag.id : nil
+                        }
+                    }
+                    .listRowBackground(
+                        RoundedRectangle(cornerRadius: Theme.Radius.m)
+                            .fill(hoveredTagID == tag.id ? Theme.Color.rowHoverFill : Color.clear)
+                            .padding(.horizontal, Theme.Space.s8)
+                    )
+                }
+            }
         }
     }
 }

@@ -16,6 +16,7 @@ enum SettingsTab: String, CaseIterable {
     case tags       = "Tags"
     case copyright  = "Copyright"
     case shortcuts  = "Shortcuts"
+    case autoTagging = "Auto Tagging"
 
     var systemImage: String {
         switch self {
@@ -23,6 +24,7 @@ enum SettingsTab: String, CaseIterable {
         case .tags:      return "tag"
         case .copyright: return "c.circle"
         case .shortcuts: return "keyboard.badge.ellipsis"
+        case .autoTagging: return "sparkles"
         }
     }
 }
@@ -60,6 +62,11 @@ struct SettingsPaneView: View {
                     SettingsIPTCPaneView(preferences: UserPreferences.shared)
                 case .shortcuts:
                     SettingsShortcutsPaneView(viewModel: viewModel)
+                case .autoTagging:
+                    SettingsAutoTaggingPaneView(
+                        preferences: UserPreferences.shared,
+                        tagStore: viewModel.tagStore
+                    )
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
