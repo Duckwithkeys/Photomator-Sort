@@ -69,7 +69,7 @@ final class VisionEngineActor {
         }
 
         return try await withCheckedThrowingContinuation { continuation in
-            let request = VNHumanBodyPoseRequest { request, error in
+            let request = VNDetectHumanBodyPoseRequest { request, error in
                 if let error = error {
                     continuation.resume(throwing: error)
                     return
