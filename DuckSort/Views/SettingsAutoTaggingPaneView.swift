@@ -79,56 +79,6 @@ struct SettingsAutoTaggingPaneView: View {
                     RoundedRectangle(cornerRadius: Theme.Radius.l)
                         .strokeBorder(Theme.Color.separator.opacity(0.4), lineWidth: 1)
                 )
-
-                // Mode 2: Perceptual Burst Deduplication & Best Shot AI Card
-                VStack(alignment: .leading, spacing: Theme.Space.s12) {
-                    HStack {
-                        HStack(spacing: Theme.Space.s12) {
-                            Image(systemName: "square.3.layers.3d.down.right")
-                                .font(.system(size: 22, weight: .semibold))
-                                .foregroundStyle(Theme.Color.warning)
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Burst Deduplication & Best Shot AI")
-                                    .font(Theme.Font.headline)
-                                    .foregroundStyle(Theme.Color.textPrimary)
-
-                                Text("Perceptual dHash grouping for burst shots with Laplacian sharpness scoring.")
-                                    .font(Theme.Font.caption)
-                                    .foregroundStyle(Theme.Color.textSecondary)
-                            }
-                        }
-
-                        Spacer()
-
-                        Toggle("", isOn: $preferences.burstDeduplicationEnabled)
-                            .toggleStyle(.switch)
-                            .labelsHidden()
-                            .controlSize(.small)
-                    }
-
-                    HStack(spacing: Theme.Space.s12) {
-                        Text("Shortcut Hotkey:")
-                            .font(Theme.Font.caption)
-                            .foregroundStyle(Theme.Color.textTertiary)
-
-                        ShortcutRecorderView(hotkey: $preferences.burstDeduplicationHotkey)
-
-                        Spacer()
-
-                        Label("Neural Engine Accelerated", systemImage: "cpu")
-                            .font(Theme.Font.caption)
-                            .foregroundStyle(Theme.Color.accent)
-                    }
-                    .padding(.top, Theme.Space.s4)
-                }
-                .padding(Theme.Space.s16)
-                .background(.thinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.l))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Radius.l)
-                        .strokeBorder(Theme.Color.separator.opacity(0.4), lineWidth: 1)
-                )
             }
             .padding(Theme.Space.s20)
         }

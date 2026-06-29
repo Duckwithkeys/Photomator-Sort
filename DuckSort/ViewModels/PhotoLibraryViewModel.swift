@@ -52,8 +52,6 @@ final class PhotoLibraryViewModel: ObservableObject {
     @Published private(set) var photoMetadata: [UUID: MetadataSnapshot] = [:]
     @Published private(set) var photoCaptions: [UUID: String] = [:]
     @Published private(set) var visionSuggestionsCache: [UUID: [AutoTagSuggestion]] = [:]
-    @Published private(set) var burstGroups: [URL: BurstGroup] = [:]
-    @Published private(set) var bestShots: Set<URL> = []
     @Published var filterRule: PhotoFilterRule = .allPhotos {
         didSet {
             guard !isInitializing else { return }
@@ -196,9 +194,6 @@ final class PhotoLibraryViewModel: ObservableObject {
             dismissedSuggestions.removeAll()
             preloadNeighbors(around: focusedPhotoIndex)
             updateDerivedState()
-            if UserPreferences.shared.burstDeduplicationEnabled {
-                runBurstDeduplication()
-            }
         }
     }
     @Published var isLargeImageViewerOpen: Bool = false
@@ -595,37 +590,7 @@ final class PhotoLibraryViewModel: ObservableObject {
             }
             
             self.loadMetadataAndTags(for: photoSets)
-            if UserPreferences.shared.burstDeduplicationEnabled {
-                self.runBurstDeduplication()
-            }
             self.isScanning = false
-        }
-    }
-
-    func runBurstDeduplication() {
-        guard !filteredPhotoSets.isEmpty else { return }
-        let centerIndex = max(0, min(focusedPhotoIndex, filteredPhotoSets.count - 1))
-        let startIndex = max(0, centerIndex - 25)
-        let endIndex = min(filteredPhotoSets.count, centerIndex + 26)
-
-        let windowPhotoSets = Array(filteredPhotoSets[startIndex..<endIndex])
-        let urls = windowPhotoSets.compactMap(\.preferredPreviewURL)
-        guard !urls.isEmpty else { return }
-
-        Task { @MainActor in
-            let groups = await PerceptualHashEngine.shared.groupBurstShots(urls: urls)
-            var map = self.burstGroups
-            var bestSet = self.bestShots
-            for group in groups {
-                for member in group.memberURLs {
-                    map[member] = group
-                }
-                if let best = await BestShotEvaluator.shared.findBestShot(in: group.memberURLs) {
-                    bestSet.insert(best.url)
-                }
-            }
-            self.burstGroups = map
-            self.bestShots = bestSet
         }
     }
     

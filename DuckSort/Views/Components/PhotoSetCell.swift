@@ -17,8 +17,6 @@ struct PhotoSetCell: View, Equatable {
     let photoSet: PhotoSet
     let tags: [CustomTag]
     let isFocusedGridItem: Bool
-    var isBurst: Bool = false
-    var isBestShot: Bool = false
     let handleClick: (MouseClick) -> Void
     let openInViewer: () -> Void
     @State private var isHovered = false
@@ -26,9 +24,7 @@ struct PhotoSetCell: View, Equatable {
     static func == (lhs: PhotoSetCell, rhs: PhotoSetCell) -> Bool {
         lhs.photoSet == rhs.photoSet &&
         lhs.tags == rhs.tags &&
-        lhs.isFocusedGridItem == rhs.isFocusedGridItem &&
-        lhs.isBurst == rhs.isBurst &&
-        lhs.isBestShot == rhs.isBestShot
+        lhs.isFocusedGridItem == rhs.isFocusedGridItem
     }
 
     enum MouseClick {
@@ -88,21 +84,6 @@ struct PhotoSetCell: View, Equatable {
                     VStack(alignment: .leading, spacing: Theme.Space.s4) {
                         HStack(alignment: .top, spacing: Theme.Space.s4) {
                             FormatBadge(status: formatBadgeStatus, label: photoSet.formatLabel)
-                            if isBestShot {
-                                Text("BEST SHOT")
-                                    .font(Theme.Font.badgeTiny)
-                                    .fontWeight(.bold)
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 5)
-                                    .padding(.vertical, 2)
-                                    .background(Theme.Color.accent, in: Capsule())
-                            } else if isBurst {
-                                Image(systemName: "square.3.layers.3d.down.right")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .padding(4)
-                                    .background(Color.black.opacity(0.6), in: Circle())
-                            }
                             Spacer(minLength: 0)
                             if let pick = photoSet.pick, pick == 1 || pick == -1 {
                                 Image(systemName: pick == 1 ? "flag.fill" : "flag.slash.fill")

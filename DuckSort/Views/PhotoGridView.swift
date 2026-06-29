@@ -169,16 +169,11 @@ struct PhotoGridView: View {
     @ViewBuilder
     private func cell(for index: Int, photoSet: PhotoSet) -> some View {
         let isFocused = index == viewModel.focusedPhotoIndex
-        let previewURL = photoSet.preferredPreviewURL
-        let isBurst = previewURL.flatMap { viewModel.burstGroups[$0] } != nil
-        let isBestShot = previewURL.map { viewModel.bestShots.contains($0) } ?? false
 
         EquatableView(content: PhotoSetCell(
             photoSet: photoSet,
             tags: viewModel.assignedTags(for: photoSet),
             isFocusedGridItem: isFocused,
-            isBurst: isBurst,
-            isBestShot: isBestShot,
             handleClick: { click in
                 viewModel.focusedPhotoIndex = index
                 switch click {
