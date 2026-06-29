@@ -77,10 +77,16 @@ struct ThumbnailView: View {
             loader.image = nil
 
             // Debounce fast scrolling
-            do { try await Task.sleep(nanoseconds: 50_000_000) } catch { return }
+            do { try await Task.sleep(nanoseconds: 30_000_000) } catch { return }
 
-            // Wait for momentum scroll to settle (No polling!)
+            // Dynamic LOD Adaptive Preloading:
+            // Fast 128px proxy when scrolling, full size on scroll settle
             if ScrollStateObserver.shared.isScrolling {
+                let fastSize = CGSize(width: 128, height: 128)
+                if let fastProxy = await ThumbnailService.shared.thumbnail(for: url, size: fastSize) {
+                    guard !Task.isCancelled else { return }
+                    loader.image = fastProxy
+                }
                 for await isScrolling in ScrollStateObserver.shared.$isScrolling.values {
                     if !isScrolling { break }
                 }
