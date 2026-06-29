@@ -146,7 +146,7 @@ struct PhotoSetCell: View, Equatable {
     private var thumbnail: some View {
         ThumbnailView(url: photoSet.preferredPreviewURL)
             .frame(maxWidth: .infinity)
-            .aspectRatio(3/2, contentMode: .fit)
+            .aspectRatio(1, contentMode: .fit)
             .saturation(isRejected ? 0 : 1)
             .opacity(isRejected ? 0.55 : 1.0)
     }

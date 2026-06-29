@@ -48,7 +48,7 @@ struct ThumbnailView: View {
             if let image = loader.image {
                 Image(nsImage: image)
                     .resizable()
-                    .scaledToFit()
+                    .scaledToFill()
                     .clipped()
                     .transition(.opacity.animation(.easeIn(duration: 0.15)))
             } else {
