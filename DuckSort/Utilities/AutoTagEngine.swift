@@ -13,58 +13,13 @@ import Foundation
 final class AutoTagEngine: Sendable {
     static let shared = AutoTagEngine()
 
-    /// Evaluates all enabled rules against the given metadata snapshot and
-    /// returns matching suggestions deduplicated by tag name.
-    ///
-    /// - Parameters:
-    ///   - metadata: The photo's EXIF metadata snapshot.
-    ///   - rules: The set of enabled rules to evaluate.
-    ///   - resolvedCategories: Pre-resolved category name → UUID mapping
-    ///     (caller resolves on the main actor; avoids @MainActor isolation
-    ///     violation from this Sendable engine).
-    /// - Returns: A deduplicated array of suggestions.
+    /// EXIF auto-tagging has been deprecated in favor of on-device AI Vision ML.
     func suggestions(
         from metadata: MetadataSnapshot,
         rules: [AutoTagRule],
         resolvedCategories: [String: UUID?]
     ) -> [AutoTagSuggestion] {
-        // If metadata is empty (no EXIF), return immediately.
-        guard metadata.hasAnyField else { return [] }
-
-        var suggestions: [AutoTagSuggestion] = []
-        var seenTagNames = Set<String>()  // for deduplication (case-insensitive)
-
-        for rule in rules where rule.enabled {
-            guard rule.condition.matches(metadata) else { continue }
-
-            for suggestedTag in rule.suggestedTags {
-                // Deduplicate: skip if we already have a suggestion for this
-                // tag name (case-insensitive) targeting the same category.
-                let dedupKey = (suggestedTag.name.lowercased(), rule.confidence)
-                if seenTagNames.contains(dedupKey.0) { continue }
-                seenTagNames.insert(dedupKey.0)
-
-                // Resolve category name → UUID via pre-resolved map.
-                let resolvedCategoryID = suggestedTag.category.flatMap {
-                    resolvedCategories[$0]
-                } ?? nil
-
-                // Build the reason string.
-                let reason = buildReason(rule.condition, metadata)
-
-                let suggestion = AutoTagSuggestion(
-                    tagName: suggestedTag.name,
-                    reason: reason,
-                    categoryID: resolvedCategoryID,
-                    confidence: rule.confidence,
-                    source: .exifRule
-                )
-
-                suggestions.append(suggestion)
-            }
-        }
-
-        return suggestions
+        return []
     }
 
     /// Evaluates Vision ML scene classifications for a photo URL and converts them to AutoTagSuggestions.
