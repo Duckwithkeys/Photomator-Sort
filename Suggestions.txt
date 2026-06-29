@@ -15,3 +15,278 @@ DUCKSORT FUTURE ARCHITECTURAL & FEATURE SUGGESTIONS
 3. PERCEPTUAL HASHING & BURST SHOT DEDUPLICATION
 - Implement a perceptual hashing engine (pHash / dHash) to compute hamming distances between images, grouping burst shots and near-duplicate photos automatically.
 - Provide automated "Best Shot" recommendations based on sharpness metrics (laplacian variance), exposure balance, and eye-open detection.
+
+================================================================================
+4. FULL CODEBASE PERFORMANCE AUDIT — PHOTO RENDERING SPEEDUP OPTIMIZATIONS
+================================================================================
+
+Exhaustive audit of every rendering-related file in the codebase. Findings organized
+by severity (HIGH → LOW) and grouped by pipeline area.
+
+────────────────────────────────────────────────────────────────────────────────
+4A. CRITICAL / HIGH IMPACT
+────────────────────────────────────────────────────────────────────────────────
+
+4A-1. [LargeImagePane.swift L36–61] Add .drawingGroup() on zoomed/panned image stack
+  The ZStack containing blur placeholder + high-res image uses .scaleEffect(), .offset(),
+  .blur(radius: 12), and .grayscale() — all CPU-composited SwiftUI modifiers with no Metal
+  backing. Every pinch/pan gesture frame re-composites these effects through Core Animation.
+  FIX: Add .drawingGroup(opaque: false) after the ZStack to flatten into a single
+  Metal-backed offscreen buffer. Expected 2-4x frame rate improvement during pan/zoom.
+
+4A-2. [LargeImagePane.swift L175–181] Release previous image before loading new one
+  SwiftUI keeps the old @Published image alive during the entire async decode of the new
+  image. For a 3072px image at 4 bytes/pixel, that's ~36 MB held unnecessarily while
+  decoding another ~36 MB.
+  FIX: At the top of .task(id:), immediately set imageLoader.image = nil and
+  imageLoader.loadedURL = nil to release the previous CGImage backing store.
+
+4A-3. [ThumbnailView.swift L36–66] Remove GeometryReader from every thumbnail cell
+  Every ThumbnailView wraps content in a GeometryReader. In a LazyVGrid with hundreds of
+  cells, this creates hundreds of simultaneous GeometryReaders forcing bottom-up layout
+  passes. The geometry is never actually needed — the parent sizes via .frame()/.aspectRatio().
+  FIX: Remove GeometryReader entirely and use the parent-provided frame.
+
+4A-4. [ThumbnailView.swift L81–90] LOD proxy (128px) not cached separately — re-decoded on every scroll
+  The 128px proxy goes through ThumbnailService which caches by URL alone. The full-size
+  (600px) version overwrites the 128px entry. When scrolling resumes, 128px must be
+  re-decoded from disk every time.
+  FIX: Use a composite cache key (url + maxPixels) or maintain a separate small NSCache
+  for 128px proxies.
+
+4A-5. [PhotoSetCell.swift L20–21] Closure properties defeat EquatableView optimization
+  PhotoSetCell has closure properties (handleClick, openInViewer) that are allocated fresh
+  on every ForEach re-evaluation. Even though EquatableView skips the body, the closure
+  heap allocation still occurs for every visible cell on any @Published change.
+  FIX: Use EnvironmentObject for viewModel + pass index directly, eliminating closures.
+
+4A-6. [PhotoGridView.swift L88–96] Per-cell GeometryReader for marquee frame tracking
+  Every cell has a GeometryReader in .background() that fires preference changes during
+  scroll, creating a feedback loop: scroll → geometry change → preference → state → re-eval.
+  FIX: Only install GeometryReaders when marquee drag is active (if marqueeStart != nil),
+  or compute hit-test from known grid layout math (column count × cell size).
+
+4A-7. [PhotoLibraryViewModel.swift L55–178] updateDerivedState() called 9–11x per batch mutation
+  ~20 @Published filter properties each call updateDerivedState() in didSet. When
+  resetFilterPopover() runs, it mutates 9 properties in sequence — 9 separate O(n)
+  filter+sort+animation passes on the entire photo library.
+  FIX: Add suppressDerivedUpdates flag + batchUpdate() wrapper that defers to one call.
+
+4A-8. [PhotoLibraryViewModel.swift L35–41] Selection embedded in value type causes O(n) cascade
+  Every photoSets = ... assignment triggers rebuildPhotoSetIndex(), updateGlobalCounts(),
+  and updateDerivedState(). A single selection toggle copies the entire [PhotoSet] array
+  and triggers O(n log n) work.
+  FIX: Extract selections into a separate @Published var selections: Set<UUID>.
+
+4A-9. [PhotoLibraryViewModel.swift L1745–1906] File I/O in sort comparator
+  photoDate(for:) calls url.resourceValues(forKeys:) — a blocking filesystem stat() call —
+  inside the sort comparator. Called O(n log n) times per sort.
+  FIX: Pre-compute and cache dates in a [UUID: Date] dictionary during metadata loading.
+
+4A-10. [PhotoLibraryViewModel.swift L642–672] Unbounded task group concurrency for metadata
+  Creates one child task per photo set inside withTaskGroup. For a 5,000-photo library,
+  that's 5,000 concurrent file I/O tasks. Exhausts file descriptors and thrashes I/O.
+  FIX: Gate with a manual concurrency limiter (semaphore or addTask pacing) at 8–16.
+
+4A-11. [MetadataReader.swift L22–23] Full image decode for EXIF-only read
+  CGImageSourceCreateWithURL loads the file with default options. For large RAW files
+  (50–80MB each), this caches pixel data unnecessarily when only reading properties.
+  FIX: Pass kCGImageSourceShouldCache: false in the source creation options.
+  Prevents ~50MB memory spike per RAW file.
+
+4A-12. [VisionEngineActor.swift L73–74] Full-resolution decode for body pose detection
+  detectBodyPoses decodes the FULL-RESOLUTION image (50+MP). Vision body pose detection
+  doesn't need more than ~1024px.
+  FIX: Use CGImageSourceCreateThumbnailAtIndex with kCGImageSourceThumbnailMaxPixelSize: 1024.
+  Reduces memory from ~200MB to ~4MB per inference. Prevents OOM crashes.
+
+────────────────────────────────────────────────────────────────────────────────
+4B. MEDIUM IMPACT
+────────────────────────────────────────────────────────────────────────────────
+
+4B-1. [LargeImagePane.swift L35, 62] GeometryReader wrapping causes extra layout passes
+  GeometryReader wraps the entire image stack, forcing two-pass layout on every body
+  evaluation. Only actually used for double-tap zoom calculation.
+  FIX: Cache container size via a background GeometryReader overlay instead.
+
+4B-2. [LargeImagePane.swift L46] Live .blur(radius: 12) recalculated every frame
+  The Gaussian blur on the low-res placeholder recomputes the kernel each frame when
+  scaleEffect or offset changes. The low-res image itself is static.
+  FIX: Pre-blur using CIImage + CIContext(Metal) before handing to SwiftUI.
+
+4B-3. [LargeImagePane.swift L257 vs L304] Preload at 2048px vs display at 3072px
+  preload() decodes at 2048px but load() decodes at 3072px. Cache returns the lower-res
+  preloaded version, or the preload work is wasted.
+  FIX: Unify both to 3072px for a culling app where users study images.
+
+4B-4. [LargeImagePane.swift L1307–1317] Preload window asymmetric and too small
+  Only preloads [-1, +1, +2]. No look-behind of -2. No priority differentiation.
+  FIX: Add -2 with .background priority; give +1 .userInitiated, +2 .utility.
+
+4B-5. [LargeImagePane.swift L217–237] lockFocus/unlockFocus downsample is CPU-only
+  HEIF fallback uses NSImage.lockFocus() — deprecated since macOS 12, no GPU acceleration.
+  FIX: Use CGContext directly or CIImage + CIContext with Metal backend.
+
+4B-6. [LargeImagePane.swift L58, 324–326] .transition(.opacity) never animated
+  Transition modifier declared but no withAnimation wrapping image state change. Image
+  swap is jarring instead of smooth crossfade.
+  FIX: Wrap image assignment in withAnimation(.easeInOut(duration: 0.15)).
+
+4B-7. [LargeImagePane.swift L253–311] No autoreleasepool in detached decode tasks
+  ImageIO creates autoreleased ObjC objects. 32 concurrent decode tasks without
+  autoreleasepool boundaries cause 100+ MB transient memory spikes during rapid navigation.
+  FIX: Wrap decode body in autoreleasepool { }.
+
+4B-8. [ThumbnailView.swift L266] Cache cost uses image.size (points) not pixel dimensions
+  On 2x Retina, cost is underreported by 4x. NSCache totalCostLimit becomes ineffective —
+  cache grows to 800MB–1.6GB instead of the intended 200–400MB budget.
+  FIX: Extract pixel dimensions from image.representations.first.
+
+4B-9. [ThumbnailView.swift L121] Semaphore limit 32 too high for I/O-bound decode
+  32 concurrent CGImageSource decodes saturate disk I/O and create 64–256 MB transient
+  memory pressure. WWDC recommends 2–4 concurrent decodes for thumbnails.
+  FIX: Clamp to ProcessInfo.processInfo.activeProcessorCount.clamped(to: 4...8).
+
+4B-10. [ThumbnailView.swift L158] NSImage(cgImage:size:) uses pixel size as point size
+  Creates NSImage with pixel dimensions as point size. On Retina, image renders at 1x scale
+  causing blurriness or incorrect upscaling.
+  FIX: Divide pixel dimensions by screen scale for proper point size.
+
+4B-11. [PhotoSetCell.swift L127–129] scaleEffect + shadow on every cell
+  .scaleEffect forces per-cell Core Animation layer. .shadow() triggers offscreen render
+  pass per cell even when isHovered is false.
+  FIX: Conditionally apply shadow only on hover, or use .drawingGroup() per cell.
+
+4B-12. [PhotoGridView.swift L85] Array(enumerated()) allocates per body evaluation
+  Array(viewModel.filteredPhotoSets.enumerated()) allocates a fresh [(Int, PhotoSet)] on
+  every re-evaluation (~50KB+ for 1000+ photos).
+  FIX: Use index-based ForEach or maintain a precomputed photoSetIndices dictionary.
+
+4B-13. [PhotoGridView.swift L146–152] Preference change triggers view re-eval during scroll
+  cellFrames is @State — updating it from onPreferenceChange triggers SwiftUI re-evaluation
+  during every scroll frame.
+  FIX: Use a non-state-triggering class-based CellFrameStore coordinator.
+
+4B-14. [PhotoGridView.swift L175] assignedTags(for:) array allocated per cell per render
+  Returns a fresh [CustomTag] array for every visible cell on every body evaluation.
+  FIX: Cache in viewModel as @Published photoSetTags: [PhotoSet.ID: [CustomTag]].
+
+4B-15. [PhotoLibraryViewModel.swift L859–903] Redundant local index dictionary build
+  setRating and setPick build a local indexByID dictionary from scratch, but
+  photoSetIndex is already maintained by the photoSets didSet.
+  FIX: Use the existing photoSetIndex property for O(1) lookups.
+
+4B-16. [PhotoLibraryViewModel.swift L355–357] selectedPhotoSets is O(n) computed in hot paths
+  Called from toolbar body evaluation, canTransfer, and batch operations. Each call
+  filters the entire photoSets array.
+  FIX: Cache alongside cachedSelectedCount in updateGlobalCounts().
+
+4B-17. [PhotoLibraryViewModel.swift L1909–1911] Spring animation on large list diffs
+  withAnimation(.spring(...)) { filteredPhotoSets = list } causes SwiftUI to diff and
+  animate potentially thousands of grid items on filter changes.
+  FIX: Only animate when count delta < 50. Use .easeInOut for large changes.
+
+4B-18. [PhotoLibraryViewModel.swift L720] Metadata dict replaced instead of merged
+  Phase 1 only has 100 entries. self.photoMetadata = metadataCache replaces the entire
+  dictionary, discarding pre-existing entries. Causes metadata flicker between phases.
+  FIX: Use self.photoMetadata.merge(metadataCache) { _, new in new }.
+
+4B-19. [PhotoLibraryViewModel.swift L1510–1523] Serial tag write chaining
+  Each tag write awaits the previous one. Batch operations (clearing 20 selected photos)
+  serialize 20 XMP writes.
+  FIX: Use a task group or coalesce pending writes into batch operations.
+
+4B-20. [MetadataReader.swift L216–244] NSRegularExpression compiled on every call
+  parseXMPText creates ~20 regex compilations per XMP file. At 5,000 files that's 100,000
+  redundant compilations.
+  FIX: Cache compiled regexes in a static [String: NSRegularExpression] dictionary.
+
+4B-21. [VisionEngineActor.swift L44–95] No Vision request batching
+  classifyImage and detectBodyPoses each create separate VNImageRequestHandlers. When both
+  are needed on the same image, the image is decoded twice.
+  FIX: Combine into a single handler.perform([classifyRequest, bodyPoseRequest]).
+
+4B-22. [ScrollStateObserver.swift L30, 40] 75ms debounce too short for momentum scroll
+  Trackpad momentum gaps > 75ms cause rapid isScrolling toggling, triggering many wasted
+  full-resolution decode tasks that get immediately cancelled.
+  FIX: Increase to 150–200ms.
+
+4B-23. [ScrollStateObserver.swift] No scroll direction tracking for prefetch
+  Observer only tracks isScrolling: Bool. Without direction, the LOD system cannot
+  prefetch thumbnails ahead of the scroll direction.
+  FIX: Track scrollDirection (up/down/idle) via contentView.bounds.origin.y delta.
+
+4B-24. [All rendering files] No ahead-of-viewport thumbnail prefetching
+  Thumbnails only load when cells appear in the LazyVGrid viewport. No prefetching N rows
+  ahead of the scroll direction.
+  FIX: Implement a prefetch coordinator using scroll direction + visible range.
+
+────────────────────────────────────────────────────────────────────────────────
+4C. LOW / CLEANUP IMPACT
+────────────────────────────────────────────────────────────────────────────────
+
+4C-1. [IOSurfaceMetalRenderer.swift L27–31] CVMetalTextureCache created per call
+  Expensive GPU memory pool allocation on every makeTexture() call.
+  FIX: Store as a property initialized once in init().
+
+4C-2. [IOSurfaceMetalRenderer.swift] Renderer completely unused — not wired into pipeline
+  No call site exists. The entire image viewer still renders via SwiftUI Image(nsImage:).
+  FIX: Wire into large image display via MTKView + NSViewRepresentable for zoomed views.
+
+4C-3. [LargeImagePane.swift L131] String(format:) in zoom label runs 60fps during gestures
+  NSString formatting overhead on every pinch gesture callback.
+  FIX: Use "\(Int((zoomScale + currentAmount) * 100))%" instead.
+
+4C-4. [LargeImagePane.swift L355–356] QuickLook scale produces 4096px (inconsistent with 3072px primary)
+  QL request uses size * backingScaleFactor yielding larger images than the primary path.
+  FIX: Pass scale: 1.0 and let size control resolution.
+
+4C-5. [ThumbnailView.swift L198] Missing kCGImageSourceShouldCache: false on source creation
+  ImageIO may cache the full-resolution decoded image behind your back.
+  FIX: Pass kCGImageSourceShouldCache: false in source creation options.
+
+4C-6. [ThumbnailView.swift L173] MainActor hop for screen scale on every QL decode
+  backingScaleFactor never changes within a session.
+  FIX: Cache screen scale once at app startup as a static let.
+
+4C-7. [ThumbnailView.swift L290–313] AsyncSemaphore cancelWaiter race condition
+  onCancel removes the LAST waiter, not the cancelled one. Can cancel wrong task.
+  FIX: Track waiters by UUID and cancel the specific continuation.
+
+4C-8. [PhotoSetCell.swift L131–134] Preload fires on every hover sweep
+  Moving the mouse across 20 cells queues 20 unnecessary large-image preloads.
+  FIX: Add 150ms debounce before triggering preload.
+
+4C-9. [PhotoSetCell.swift L223–239] Dead code: tagPills computed property never called
+  FIX: Delete dead code.
+
+4C-10. [PhotoSetCell.swift L75–81] Empty overlay creates unnecessary view node
+  Color.clear overlay does nothing.
+  FIX: Remove the empty overlay and merge selection/focus ring overlays.
+
+4C-11. [FilmstripView.swift L18] Array(enumerated()) copies entire photo list
+  ForEach(Array(viewModel.filteredPhotoSets.enumerated())) allocates full tuple array.
+  FIX: Use index-based ForEach with .indices.
+
+4C-12. [FilmstripView.swift L114–116] withAnimation in hover leaks animation to siblings
+  FIX: Use .animation(.easeInOut, value: isHovered) instead of withAnimation wrapper.
+
+4C-13. [FileScanner.swift L291–293] Intermediate URL allocations in groupingKey
+  Creates 2 intermediate URL objects per file to produce a string key.
+  FIX: Use string manipulation directly on the path.
+
+4C-14. [MetadataReader.swift L210–212] Calendar instance created on every parseExifDate call
+  Calendar construction is surprisingly expensive due to locale resolution.
+  FIX: Use a static let calendar instance.
+
+4C-15. [PhotoLibraryViewModel.swift L371–372] Uncached O(n) computed counts still exposed
+  editedCount/uneditedCount recompute on every access despite cached values existing.
+  FIX: Return cachedEditedCount/cachedUneditedCount.
+
+4C-16. [ContentView.swift L682–686] WindowConfigurator runs on every SwiftUI update
+  updateNSView calls configure() via DispatchQueue.main.async on every view update.
+  FIX: Track configuration state and skip subsequent calls.
+
+4C-17. [ContentView.swift L365–481] Linear tag scan per keypress
+  Iterates all tags on every key press to match shortcuts.
+  FIX: Build [KeyboardShortcutInfo: CustomTag] lookup table, O(1) per keypress.
