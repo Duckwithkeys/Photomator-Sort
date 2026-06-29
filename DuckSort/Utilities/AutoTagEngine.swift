@@ -66,6 +66,23 @@ final class AutoTagEngine: Sendable {
         return suggestions
     }
 
+    /// Evaluates Vision ML scene classifications for a photo URL and converts them to AutoTagSuggestions.
+    func visionSuggestions(for url: URL, confidenceThreshold: Float = 0.3) async -> [AutoTagSuggestion] {
+        guard let classifications = try? await VisionEngineActor.shared.classifyImage(at: url, confidenceThreshold: confidenceThreshold) else {
+            return []
+        }
+
+        return classifications.map { classification in
+            let label = classification.identifier.components(separatedBy: ",").first?.capitalized ?? classification.identifier
+            return AutoTagSuggestion(
+                tagName: label,
+                reason: "Vision ML: \(Int(classification.confidence * 100))% match",
+                categoryID: nil,
+                confidence: Double(classification.confidence)
+            )
+        }
+    }
+
     // MARK: - Private
 
     private func buildReason(_ condition: Condition, _ metadata: MetadataSnapshot) -> String {
