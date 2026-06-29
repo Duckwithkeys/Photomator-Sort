@@ -233,7 +233,7 @@ struct LargeImageViewerSidebar: View {
                     Divider()
 
                     // Section: Burst Shot & Best Shot AI Status
-                    if let photoSet = photoSet, let previewURL = photoSet.preferredPreviewURL {
+                    if let photoSet = viewModel.currentFocusedPhotoSet, let previewURL = photoSet.preferredPreviewURL {
                         let burstGroup = viewModel.burstGroups[previewURL]
                         let isBest = viewModel.bestShots.contains(previewURL)
 
