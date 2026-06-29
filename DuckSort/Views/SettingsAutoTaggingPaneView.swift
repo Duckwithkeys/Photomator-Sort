@@ -24,11 +24,11 @@ struct SettingsAutoTaggingPaneView: View {
             // Header
             HStack {
                 VStack(alignment: .leading, spacing: Theme.Space.s4) {
-                    Text("Auto Tagging")
+                    Text("Auto Tagging & AI Vision")
                         .font(Theme.Font.title)
                         .foregroundStyle(Theme.Color.textPrimary)
 
-                    Text("Suggest tags based on EXIF camera metadata when focusing a photo.")
+                    Text("Configure on-device AI Vision machine learning and background EXIF rules.")
                         .font(Theme.Font.body)
                         .foregroundStyle(Theme.Color.textSecondary)
                 }

@@ -1419,18 +1419,6 @@ final class PhotoLibraryViewModel: ObservableObject {
 
         var combined: [AutoTagSuggestion] = []
 
-        if let metadata = photoMetadata[photoSet.id] {
-            let rules = UserPreferences.shared.autoTaggingRules.filter(\.enabled)
-            let catMap: [String: UUID?] = Dictionary(
-                uniqueKeysWithValues: tagStore.categories.map { ($0.name, $0.id) }
-            )
-            combined.append(contentsOf: AutoTagEngine.shared.suggestions(
-                from: metadata,
-                rules: rules,
-                resolvedCategories: catMap
-            ))
-        }
-
         if let visionML = visionSuggestionsCache[photoSet.id] {
             combined.append(contentsOf: visionML)
         }
