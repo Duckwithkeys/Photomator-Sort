@@ -51,6 +51,7 @@ final class PhotoLibraryViewModel: ObservableObject {
     }
     @Published private(set) var photoMetadata: [UUID: MetadataSnapshot] = [:]
     @Published private(set) var photoCaptions: [UUID: String] = [:]
+    @Published private(set) var visionSuggestionsCache: [UUID: [AutoTagSuggestion]] = [:]
     @Published var filterRule: PhotoFilterRule = .allPhotos {
         didSet {
             guard !isInitializing else { return }
@@ -1402,23 +1403,40 @@ final class PhotoLibraryViewModel: ObservableObject {
     // MARK: - Auto-tagging
     
     /// Returns auto-tag suggestions for the given photo set, based on
-    /// the user's enabled rules and the photo's EXIF metadata.
+    /// the user's enabled rules, EXIF metadata, and Vision ML classifications.
     func suggestedTags(for photoSet: PhotoSet) -> [AutoTagSuggestion] {
         guard UserPreferences.shared.autoTaggingEnabled else { return [] }
-        guard let metadata = photoMetadata[photoSet.id] else { return [] }
-        let rules = UserPreferences.shared.autoTaggingRules.filter(\.enabled)
-        // Resolve category names → IDs on the main actor (tagStore is
-        // @MainActor-isolated), then pass the resolved map to the engine.
-        let catMap: [String: UUID?] = Dictionary(
-            uniqueKeysWithValues: tagStore.categories.map { ($0.name, $0.id) }
-        )
-        let suggestions = AutoTagEngine.shared.suggestions(
-            from: metadata,
-            rules: rules,
-            resolvedCategories: catMap
-        )
+        
+        // Trigger background Vision ML classification if not already cached
+        if visionSuggestionsCache[photoSet.id] == nil, let previewURL = photoSet.preferredPreviewURL {
+            Task { @MainActor in
+                if self.visionSuggestionsCache[photoSet.id] == nil {
+                    let mlSuggestions = await AutoTagEngine.shared.visionSuggestions(for: previewURL)
+                    self.visionSuggestionsCache[photoSet.id] = mlSuggestions
+                }
+            }
+        }
+
+        var combined: [AutoTagSuggestion] = []
+
+        if let metadata = photoMetadata[photoSet.id] {
+            let rules = UserPreferences.shared.autoTaggingRules.filter(\.enabled)
+            let catMap: [String: UUID?] = Dictionary(
+                uniqueKeysWithValues: tagStore.categories.map { ($0.name, $0.id) }
+            )
+            combined.append(contentsOf: AutoTagEngine.shared.suggestions(
+                from: metadata,
+                rules: rules,
+                resolvedCategories: catMap
+            ))
+        }
+
+        if let visionML = visionSuggestionsCache[photoSet.id] {
+            combined.append(contentsOf: visionML)
+        }
+
         // Filter out dismissed suggestions.
-        return suggestions.filter { suggestion in
+        return combined.filter { suggestion in
             !dismissedSuggestions.contains(DismissedSuggestionKey(photoSetID: photoSet.id, tagName: suggestion.tagName))
         }
     }
