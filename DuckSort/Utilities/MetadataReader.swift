@@ -19,7 +19,8 @@ struct MetadataReader: Sendable {
             }
         }
 
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+        let options: [CFString: Any] = [kCGImageSourceShouldCache as CFString: false]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, options as CFDictionary),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
         else {
             if let data = try? Data(contentsOf: url), let xmlString = String(data: data, encoding: .utf8) {

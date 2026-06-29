@@ -45,6 +45,14 @@ final class PhotoLibraryViewModel: ObservableObject {
     /// array. Every method that previously did `photoSets.firstIndex(where:)`
     /// should go through this index instead.
     private var photoSetIndex: [UUID: Int] = [:]
+    private var suppressDerivedUpdates = false
+
+    func batchUpdate(_ body: () -> Void) {
+        suppressDerivedUpdates = true
+        body()
+        suppressDerivedUpdates = false
+        updateDerivedState()
+    }
 
     private func rebuildPhotoSetIndex() {
         photoSetIndex = Dictionary(uniqueKeysWithValues: photoSets.enumerated().map { ($1.id, $0) })
@@ -645,7 +653,15 @@ final class PhotoLibraryViewModel: ObservableObject {
         xmpTagging: XMPTaggingService
     ) async -> [LoadedPhotoInfo] {
         await withTaskGroup(of: LoadedPhotoInfo.self) { group in
+            let maxConcurrency = 16
+            var inFlight = 0
             for photo in batch {
+                if inFlight >= maxConcurrency {
+                    if let result = await group.next() {
+                        inFlight -= 1
+                    }
+                }
+                inFlight += 1
                 group.addTask {
                     let metadata: MetadataSnapshot
                     if let url = photo.preferredPreviewURL {
@@ -1742,16 +1758,25 @@ final class PhotoLibraryViewModel: ObservableObject {
 
     // MARK: - Count Memoization & Index Clamping
     
+    private var photoDateCache: [UUID: Date] = [:]
+
     func photoDate(for photoSet: PhotoSet) -> Date {
+        if let cached = photoDateCache[photoSet.id] {
+            return cached
+        }
         if let captureDate = photoMetadata[photoSet.id]?.captureDate {
+            photoDateCache[photoSet.id] = captureDate
             return captureDate
         }
         if let fileURL = photoSet.mediaFiles.first,
            let values = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]),
            let modDate = values.contentModificationDate {
+            photoDateCache[photoSet.id] = modDate
             return modDate
         }
-        return Date.distantPast
+        let fallback = Date.distantPast
+        photoDateCache[photoSet.id] = fallback
+        return fallback
     }
 
     func updateDerivedState() {

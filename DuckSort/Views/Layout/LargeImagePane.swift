@@ -59,6 +59,7 @@ struct LargeImagePane: View {
                                 .grayscale(photoSet.pick == -1 ? 0.8 : 0)
                         }
                     }
+                    .drawingGroup(opaque: false)
                     .frame(width: geometry.size.width, height: geometry.size.height)
                     .gesture(
                         MagnificationGesture()
@@ -177,6 +178,8 @@ struct LargeImagePane: View {
             currentAmount = 0
             panOffset = .zero
             accumulatedPan = .zero
+            imageLoader.image = nil
+            imageLoader.loadedURL = nil
             await imageLoader.load(url: photoSet.preferredPreviewURL)
         }
     }

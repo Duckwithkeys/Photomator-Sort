@@ -86,12 +86,16 @@ struct PhotoGridView: View {
                                 cell(for: index, photoSet: photoSet)
                                     .id(photoSet.id)
                                     .background(
-                                        GeometryReader { proxy in
-                                            Color.clear
-                                                .preference(
-                                                    key: CellFramePreferenceKey.self,
-                                                    value: [CellFrame(id: photoSet.id, frame: proxy.frame(in: .named("PhotoGrid")))]
-                                                )
+                                        Group {
+                                            if marqueeStart != nil {
+                                                GeometryReader { proxy in
+                                                    Color.clear
+                                                        .preference(
+                                                            key: CellFramePreferenceKey.self,
+                                                            value: [CellFrame(id: photoSet.id, frame: proxy.frame(in: .named("PhotoGrid")))]
+                                                        )
+                                                }
+                                            }
                                         }
                                     )
                             }

@@ -31,40 +31,33 @@ struct ThumbnailView: View {
     @StateObject private var loader = ThumbnailLoader()
 
     var body: some View {
-        Color.clear
-            .overlay {
-                GeometryReader { geo in
-                    ZStack {
-                        // Placeholder
-                        RoundedRectangle(cornerRadius: cornerRadius)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Theme.Color.cellBackground,
-                                        Theme.Color.separator.opacity(0.6)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
+        ZStack {
+            // Placeholder
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Theme.Color.cellBackground,
+                            Theme.Color.separator.opacity(0.6)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
 
-                        if let image = loader.image {
-                            Image(nsImage: image)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: geo.size.width, height: geo.size.height)
-                                .clipped()
-                                .transition(.opacity.animation(.easeIn(duration: 0.15)))
-                        } else {
-                            Image(systemName: "photo")
-                                .font(Theme.Font.iconHero)
-                                .foregroundStyle(Theme.Color.textTertiary)
-                                .frame(width: geo.size.width, height: geo.size.height)
-                        }
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-                }
+            if let image = loader.image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .clipped()
+                    .transition(.opacity.animation(.easeIn(duration: 0.15)))
+            } else {
+                Image(systemName: "photo")
+                    .font(Theme.Font.iconHero)
+                    .foregroundStyle(Theme.Color.textTertiary)
             }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
         .task(id: url) {
             guard let url else { return }
             
