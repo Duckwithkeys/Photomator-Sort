@@ -301,8 +301,10 @@ final class LargeImageLoader: ObservableObject {
             if Task.isCancelled { return nil }
             let options: [CFString: Any] = [
                 alwaysCreate ? kCGImageSourceCreateThumbnailFromImageAlways : kCGImageSourceCreateThumbnailFromImageIfAbsent: true,
-                kCGImageSourceThumbnailMaxPixelSize: CGFloat(2048),
-                kCGImageSourceCreateThumbnailWithTransform: true
+                kCGImageSourceThumbnailMaxPixelSize: CGFloat(3072),
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true,
+                kCGImageSourceShouldAllowFloat: true
             ]
             guard let thumbnailCG = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) else { return nil }
             return thumbnailCG

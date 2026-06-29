@@ -26,7 +26,7 @@ import SwiftUI
 
 struct ThumbnailView: View {
     let url: URL?
-    var size: CGSize = CGSize(width: 300, height: 300)
+    var size: CGSize = CGSize(width: 600, height: 600)
     var cornerRadius: CGFloat = Theme.Radius.xl
     @StateObject private var loader = ThumbnailLoader()
 
@@ -202,7 +202,9 @@ final class ThumbnailService {
                 ? kCGImageSourceCreateThumbnailFromImageAlways
                 : kCGImageSourceCreateThumbnailFromImageIfAbsent): true,
             kCGImageSourceThumbnailMaxPixelSize: maxPixels,
-            kCGImageSourceCreateThumbnailWithTransform: true
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceShouldAllowFloat: true
         ]
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
