@@ -232,6 +232,51 @@ struct LargeImageViewerSidebar: View {
 
                     Divider()
 
+                    // Section: Burst Shot & Best Shot AI Status
+                    if let photoSet = photoSet, let previewURL = photoSet.preferredPreviewURL {
+                        let burstGroup = viewModel.burstGroups[previewURL]
+                        let isBest = viewModel.bestShots.contains(previewURL)
+
+                        VStack(alignment: .leading, spacing: Theme.Space.s6) {
+                            sectionHeader("BURST & BEST SHOT AI")
+
+                            HStack(spacing: Theme.Space.s8) {
+                                Image(systemName: "square.3.layers.3d.down.right")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(burstGroup != nil ? Theme.Color.warning : Theme.Color.textTertiary)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    if let group = burstGroup {
+                                        Text("Burst Cluster (\(group.memberURLs.count) photos)")
+                                            .font(Theme.Font.caption)
+                                            .fontWeight(.bold)
+                                            .foregroundStyle(Theme.Color.textPrimary)
+                                    } else {
+                                        Text("Single Shot (No Burst)")
+                                            .font(Theme.Font.caption)
+                                            .foregroundStyle(Theme.Color.textSecondary)
+                                    }
+
+                                    if isBest {
+                                        Label("RECOMMENDED BEST SHOT", systemImage: "star.fill")
+                                            .font(Theme.Font.badgeTiny)
+                                            .fontWeight(.bold)
+                                            .foregroundStyle(Theme.Color.accent)
+                                    }
+                                }
+                            }
+                            .padding(Theme.Space.s10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Theme.Color.cellBackground, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: Theme.Radius.m)
+                                    .stroke(isBest ? Theme.Color.accent.opacity(0.4) : Theme.Color.separator, lineWidth: 1)
+                            )
+                        }
+                    }
+
+                    Divider()
+
                     // Section 5: Auto-tag suggestions
                     AutoTagSuggestionsView(viewModel: viewModel)
                 }

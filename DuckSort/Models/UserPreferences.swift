@@ -49,7 +49,7 @@ final class UserPreferences: ObservableObject {
     @Published var ruleEditorHotkey: String = "cmd+r"
     @Published var openSourceHotkey: String = "cmd+o"
     @Published var aiVisionHotkey: String? = "cmd+shift+a"
-    @Published var burstDeduplicationEnabled: Bool = false
+    @Published var burstDeduplicationEnabled: Bool = true
     @Published var burstDeduplicationHotkey: String? = "cmd+shift+d"
 
     // MARK: - IPTC / Copyright Embedding
