@@ -13,6 +13,23 @@ struct LargeImageViewerSidebar: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.s20) {
+                    // Section 0.5: Speed-Culling Mode
+                    VStack(alignment: .leading, spacing: Theme.Space.s10) {
+                        sectionHeader("SPEED-CULLING MODE")
+                        Toggle(isOn: $viewModel.speedCullingEnabled) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Auto-Advance & Haptics")
+                                    .font(Theme.Font.bodyBold)
+                                Text("Instantly advance to next photo upon rating, flagging, or tagging with trackpad haptics.")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(Theme.Color.textSecondary)
+                            }
+                        }
+                        .toggleStyle(.checkbox)
+                    }
+
+                    Divider()
+
                     // Section 1: Tags
                     VStack(alignment: .leading, spacing: Theme.Space.s10) {
                         sectionHeader("ACTIVE TAGS")

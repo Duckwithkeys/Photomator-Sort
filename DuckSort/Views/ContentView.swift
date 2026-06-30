@@ -343,6 +343,10 @@ struct ContentView: View {
                 } else {
                     viewModel.setRating(rating, forIDs: ids)
                 }
+                if viewModel.speedCullingEnabled {
+                    viewModel.triggerHapticFeedback()
+                    viewModel.advanceToNext()
+                }
             }
             return true
         }
@@ -350,13 +354,24 @@ struct ContentView: View {
         switch char.lowercased() {
         case "z":
             // Pick-flag is a culling workflow; stays single-photo.
-            if let photo = viewModel.currentFocusedPhotoSet { viewModel.setPick(1, for: photo.id) }
+            if let photo = viewModel.currentFocusedPhotoSet {
+                viewModel.setPick(1, for: photo.id)
+                if viewModel.speedCullingEnabled {
+                    viewModel.triggerHapticFeedback()
+                    viewModel.advanceToNext()
+                }
+            }
             return true
         case "x":
             if let photo = viewModel.currentFocusedPhotoSet { viewModel.rejectAndAdvance(for: photo.id) }
             return true
         case "u":
+            let hasTargets = !viewModel.batchTargetPhotoSets.isEmpty
             viewModel.clearPickFlagOnSelection()
+            if hasTargets && viewModel.speedCullingEnabled {
+                viewModel.triggerHapticFeedback()
+                viewModel.advanceToNext()
+            }
             return true
         default:
             break
@@ -364,7 +379,12 @@ struct ContentView: View {
 
         for tag in viewModel.tagStore.tags {
             if let shortcut = tag.shortcutInfo, eventMatchesShortcut(event, shortcut: shortcut) {
+                let hasTargets = !viewModel.batchTargetPhotoSets.isEmpty
                 viewModel.applyTagToSelection(tag)
+                if hasTargets && viewModel.speedCullingEnabled {
+                    viewModel.triggerHapticFeedback()
+                    viewModel.advanceToNext()
+                }
                 return true
             }
         }

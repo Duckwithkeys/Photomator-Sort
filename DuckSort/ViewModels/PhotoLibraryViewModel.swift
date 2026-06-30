@@ -93,6 +93,14 @@ final class PhotoLibraryViewModel: ObservableObject {
         }
     }
 
+    @Published var speedCullingEnabled: Bool = false {
+        didSet {
+            guard !isInitializing else { return }
+            UserPreferences.shared.speedCullingEnabled = speedCullingEnabled
+            UserPreferences.shared.save()
+        }
+    }
+
     // MARK: - Sorting and Filtering State
     
     enum SortOrder: String, CaseIterable {
@@ -318,6 +326,7 @@ final class PhotoLibraryViewModel: ObservableObject {
 
 
         self.isInspectorOpen = UserPreferences.shared.isInspectorOpen
+        self.speedCullingEnabled = UserPreferences.shared.speedCullingEnabled
         
         let urls = UserPreferences.shared.lastSourceDirectoryIDs.map { URL(fileURLWithPath: $0) }
         self.sourceDirectories = urls
@@ -945,6 +954,17 @@ final class PhotoLibraryViewModel: ObservableObject {
         }
     }
 
+    func triggerHapticFeedback() {
+        #if os(macOS)
+        NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
+        #endif
+    }
+
+    func advanceToNext() {
+        guard focusedPhotoIndex < filteredPhotoSets.count - 1 else { return }
+        focusedPhotoIndex += 1
+    }
+
     /// Clear pick flag on every photo in the current selection (or focused
     /// photo if nothing is selected). Bound to the "U" hotkey.
     func clearPickFlagOnSelection() {
@@ -963,8 +983,9 @@ final class PhotoLibraryViewModel: ObservableObject {
         // setPick triggers updateDerivedState, which removes rejected
         // photos from filteredPhotoSets.
         let priorIndex = filteredPhotoSets.firstIndex(where: { $0.id == id })
-
+ 
         setPick(-1, for: id)
+        triggerHapticFeedback()
 
         guard !filteredPhotoSets.isEmpty else { return }
         guard let currentIndex = priorIndex else { return }

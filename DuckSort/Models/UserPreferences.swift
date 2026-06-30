@@ -22,6 +22,9 @@ final class UserPreferences: ObservableObject {
     @Published var lastFilterRule: PhotoFilterRule = .allPhotos
     @Published var isInspectorOpen: Bool = false
     @Published var showAdvancedEXIF: Bool = false
+    @Published var speedCullingEnabled: Bool = false {
+        didSet { save() }
+    }
 
     // MARK: - Auto Tagging
 
@@ -87,6 +90,7 @@ final class UserPreferences: ObservableObject {
         static let isInspectorOpen = "isInspectorOpen"
         static let showAdvancedEXIF = "showAdvancedEXIF"
         static let activeTagPackID = "activeTagPackID"
+        static let speedCullingEnabled = "speedCullingEnabled"
 
         // Auto tagging
         static let autoTaggingEnabled = "autoTaggingEnabled"
@@ -137,6 +141,7 @@ final class UserPreferences: ObservableObject {
         UserDefaults.standard.set(isInspectorOpen, forKey: Keys.isInspectorOpen)
         UserDefaults.standard.set(showAdvancedEXIF, forKey: Keys.showAdvancedEXIF)
         UserDefaults.standard.set(activeTagPackID, forKey: Keys.activeTagPackID)
+        UserDefaults.standard.set(speedCullingEnabled, forKey: Keys.speedCullingEnabled)
 
         // Auto tagging
         UserDefaults.standard.set(autoTaggingEnabled, forKey: Keys.autoTaggingEnabled)
@@ -175,6 +180,7 @@ final class UserPreferences: ObservableObject {
 
         isInspectorOpen = UserDefaults.standard.bool(forKey: Keys.isInspectorOpen)
         showAdvancedEXIF = UserDefaults.standard.bool(forKey: Keys.showAdvancedEXIF)
+        speedCullingEnabled = UserDefaults.standard.bool(forKey: Keys.speedCullingEnabled)
         activeTagPackID = UserDefaults.standard.string(forKey: Keys.activeTagPackID) ?? TagPack.defaultPackID
 
         // Auto tagging
@@ -207,6 +213,7 @@ final class UserPreferences: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Keys.isInspectorOpen)
         UserDefaults.standard.removeObject(forKey: Keys.showAdvancedEXIF)
         UserDefaults.standard.removeObject(forKey: Keys.activeTagPackID)
+        UserDefaults.standard.removeObject(forKey: Keys.speedCullingEnabled)
 
         // Auto tagging
         UserDefaults.standard.removeObject(forKey: Keys.autoTaggingEnabled)
@@ -230,6 +237,7 @@ final class UserPreferences: ObservableObject {
         lastFilterRule = .allPhotos
         isInspectorOpen = false
         showAdvancedEXIF = false
+        speedCullingEnabled = false
         activeTagPackID = TagPack.defaultPackID
 
         // Auto tagging
