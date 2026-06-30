@@ -33,7 +33,6 @@ struct SidebarView: View {
                 if isTagsExpanded {
                     ActiveTagsDetailSectionView(viewModel: viewModel)
                 }
-                InsightsSectionView(viewModel: viewModel)
                 LibrarySectionView(viewModel: viewModel)
                 SourcesSectionView(viewModel: viewModel, expandedFolderPaths: $expandedFolderPaths)
                 TagsSectionView(viewModel: viewModel)
@@ -892,48 +891,6 @@ struct ActiveTagsDetailSectionView: View {
                     )
                 }
             }
-        }
-    }
-}
-
-// MARK: - Insights Section View
-
-struct InsightsSectionView: View {
-    @ObservedObject var viewModel: PhotoLibraryViewModel
-    @State private var isHovered = false
-
-    var body: some View {
-        Section("INSIGHTS") {
-            Button {
-                viewModel.showAnalytics = true
-                NSApp.keyWindow?.makeFirstResponder(nil)
-            } label: {
-                HStack {
-                    Image(systemName: "chart.bar.fill")
-                        .foregroundStyle(viewModel.showAnalytics ? Theme.Color.accent : Theme.Color.textSecondary)
-                        .frame(width: 16)
-                    Text("Analytics Dashboard")
-                        .foregroundStyle(Theme.Color.textPrimary)
-                    Spacer()
-                }
-                .padding(.vertical, Theme.Space.s4)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .onHover { hovering in
-                withAnimation(.easeInOut(duration: 0.12)) {
-                    isHovered = hovering
-                }
-            }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: Theme.Radius.m)
-                    .fill(
-                        viewModel.showAnalytics
-                        ? Theme.Color.rowSelectedFill
-                        : (isHovered ? Theme.Color.rowHoverFill : Color.clear)
-                    )
-                    .padding(.horizontal, Theme.Space.s8)
-            )
         }
     }
 }

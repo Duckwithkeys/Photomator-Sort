@@ -60,11 +60,9 @@ final class PhotoLibraryViewModel: ObservableObject {
     @Published private(set) var photoMetadata: [UUID: MetadataSnapshot] = [:]
     @Published private(set) var photoCaptions: [UUID: String] = [:]
     @Published private(set) var visionSuggestionsCache: [UUID: [AutoTagSuggestion]] = [:]
-    @Published var showAnalytics: Bool = false
     @Published var filterRule: PhotoFilterRule = .allPhotos {
         didSet {
             guard !isInitializing else { return }
-            showAnalytics = false
             UserPreferences.shared.lastFilterRule = filterRule
             UserPreferences.shared.save()
             updateDerivedState()
@@ -72,7 +70,6 @@ final class PhotoLibraryViewModel: ObservableObject {
     }
     @Published var selectedTagFilters: Set<UUID> = [] {
         didSet {
-            showAnalytics = false
             updateDerivedState()
         }
     }
@@ -212,7 +209,6 @@ final class PhotoLibraryViewModel: ObservableObject {
             // (ephemeral per-session, per-photo).
             dismissedSuggestions.removeAll()
             preloadNeighbors(around: focusedPhotoIndex)
-            updateDerivedState()
         }
     }
     @Published var isLargeImageViewerOpen: Bool = false
@@ -224,7 +220,6 @@ final class PhotoLibraryViewModel: ObservableObject {
     
     @Published var selectedSubfolderFilter: URL? = nil {
         didSet {
-            showAnalytics = false
             updateDerivedState()
         }
     }
