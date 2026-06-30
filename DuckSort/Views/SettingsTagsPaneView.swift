@@ -89,53 +89,56 @@ private struct TagPacksHeader: View {
             .padding(.top, Theme.Space.s10)
             .padding(.bottom, Theme.Space.s8)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: Theme.Space.s8) {
-                    ForEach(viewModel.packLibrary.packs) { state in
-                        TagPackMiniCard(
-                            state: state,
-                            isActive: state.id == UserPreferences.shared.activeTagPackID,
-                            onActivate: {
-                                pendingSwitchID = state.id
-                                showingSwitchConfirm = true
-                            },
-                            onRename: {
-                                renameText = state.name
-                                renameTarget = state
-                            },
-                            onReset: {
-                                pendingResetID = state.id
-                                showingResetConfirm = true
-                            },
-                            onDuplicate: {
-                                if let copy = viewModel.duplicatePack(id: state.id,
-                                                                         newName: "\(state.name) Copy") {
-                                    viewModel.switchTagPack(id: copy.id)
+            HorizontalMouseScrollWrapper {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: Theme.Space.s8) {
+                        ForEach(viewModel.packLibrary.packs) { state in
+                            TagPackMiniCard(
+                                state: state,
+                                isActive: state.id == UserPreferences.shared.activeTagPackID,
+                                onActivate: {
+                                    pendingSwitchID = state.id
+                                    showingSwitchConfirm = true
+                                },
+                                onRename: {
+                                    renameText = state.name
+                                    renameTarget = state
+                                },
+                                onReset: {
+                                    pendingResetID = state.id
+                                    showingResetConfirm = true
+                                },
+                                onDuplicate: {
+                                    if let copy = viewModel.duplicatePack(id: state.id,
+                                                                             newName: "\(state.name) Copy") {
+                                        viewModel.switchTagPack(id: copy.id)
+                                    }
+                                },
+                                onDelete: {
+                                    pendingDeleteID = state.id
+                                    showingDeleteConfirm = true
+                                },
+                                onExport: {
+                                    viewModel.exportPack(id: state.id)
+                                },
+                                onRestyle: {
+                                    styleTarget = state
+                                },
+                                onSetHotkey: {
+                                    hotkeyTarget = state
+                                },
+                                onClearHotkey: {
+                                    viewModel.packLibrary.clearHotkey(forPackID: state.id)
                                 }
-                            },
-                            onDelete: {
-                                pendingDeleteID = state.id
-                                showingDeleteConfirm = true
-                            },
-                            onExport: {
-                                viewModel.exportPack(id: state.id)
-                            },
-                            onRestyle: {
-                                styleTarget = state
-                            },
-                            onSetHotkey: {
-                                hotkeyTarget = state
-                            },
-                            onClearHotkey: {
-                                viewModel.packLibrary.clearHotkey(forPackID: state.id)
-                            }
-                        )
+                            )
+                        }
                     }
+                    .padding(.horizontal, Theme.Space.s16)
+                    .padding(.vertical, 3)
+                    .padding(.bottom, Theme.Space.s14)
                 }
-                .padding(.horizontal, Theme.Space.s16)
-                .padding(.vertical, 3)
-                .padding(.bottom, Theme.Space.s14)
             }
+
         }
         .background(Theme.Color.surfaceBase)
         .sheet(isPresented: $showingNewPack) {
