@@ -14,7 +14,7 @@ struct PreFlightVisualizerView: View {
     let onConfirm: () -> Void
     let onCancel: () -> Void
 
-    @State private var folders: [SimulatedFolder] = []
+    @State private var rootNode = SimulatedFolderTree.Node(name: "", url: URL(fileURLWithPath: "/"))
     @State private var isSimulating = true
     @State private var summaryStats = SummaryStats()
     @State private var collapsedFolders: Set<URL> = []
@@ -158,10 +158,8 @@ struct PreFlightVisualizerView: View {
                 .background(Theme.Color.sidebarBackground)
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: Theme.Space.s16) {
-                        ForEach(folders) { folder in
-                            folderSection(for: folder)
-                        }
+                    VStack(alignment: .leading, spacing: Theme.Space.s12) {
+                        SimulatedFolderNodeView(node: rootNode, collapsedFolders: $collapsedFolders)
                     }
                     .padding(Theme.Space.s16)
                 }
@@ -169,99 +167,6 @@ struct PreFlightVisualizerView: View {
             }
             .frame(minWidth: 450, idealWidth: 500, maxWidth: .infinity)
         }
-    }
-
-    private func isExpandedBinding(for folder: SimulatedFolder) -> Binding<Bool> {
-        Binding(
-            get: { !collapsedFolders.contains(folder.url) },
-            set: { expand in
-                withAnimation(.smooth(duration: 0.15)) {
-                    if expand {
-                        collapsedFolders.remove(folder.url)
-                    } else {
-                        collapsedFolders.insert(folder.url)
-                    }
-                }
-            }
-        )
-    }
-
-    private func folderSection(for folder: SimulatedFolder) -> some View {
-        DisclosureGroup(isExpanded: isExpandedBinding(for: folder)) {
-            // Subfiles mapped inside this folder
-            VStack(alignment: .leading, spacing: Theme.Space.s6) {
-                ForEach(folder.files) { file in
-                    HStack(spacing: Theme.Space.s10) {
-                        Image(systemName: "doc")
-                            .font(Theme.Font.caption)
-                            .foregroundStyle(Theme.Color.textSecondary)
-                        
-                        Text(file.sourceURL.lastPathComponent)
-                            .font(Theme.Font.monoCaption)
-                            .foregroundStyle(Theme.Color.textPrimary)
-                        
-                        Spacer()
-                        
-                        if case .rename(let uniqueURL) = file.resolution {
-                            HStack(spacing: 4) {
-                                Image(systemName: "arrow.right")
-                                    .font(Theme.Font.caption2)
-                                    .foregroundStyle(Theme.Color.textTertiary)
-                                Text(uniqueURL.lastPathComponent)
-                                    .font(Theme.Font.monoCaption)
-                                    .foregroundStyle(Theme.Color.accent)
-                            }
-                        }
-
-                        resolutionPill(for: file.resolution)
-                    }
-                    .padding(.vertical, 3)
-                }
-            }
-            .padding(.leading, 12)
-            .padding(.vertical, Theme.Space.s6)
-        } label: {
-            HStack(spacing: Theme.Space.s6) {
-                Image(systemName: "folder")
-                    .foregroundStyle(Theme.Color.accent)
-                    .font(.system(size: 11))
-                
-                Text(folder.relativeDirectoryPath(base: plan.baseDestination))
-                    .font(Theme.Font.bodyBold)
-                    .foregroundStyle(Theme.Color.textPrimary)
-                
-                Spacer()
-                
-                Text("\(folder.files.count) files")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Theme.Color.textSecondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(
-                        Capsule().fill(Theme.Color.overlaySoft)
-                    )
-            }
-            .padding(.vertical, 4)
-        }
-        .tint(Theme.Color.textSecondary)
-    }
-
-    private func resolutionPill(for resolution: CollisionResolution) -> some View {
-        let text = resolution.label
-        let color: Color
-        switch resolution {
-        case .normal:    color = Theme.Color.success
-        case .rename:    color = Theme.Color.accent
-        case .overwrite: color = Theme.Color.warning
-        case .skip:      color = Theme.Color.textTertiary
-        }
-
-        return Text(text)
-            .font(.system(size: 9, weight: .bold))
-            .foregroundStyle(Theme.Color.textInverse)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color, in: RoundedRectangle(cornerRadius: Theme.Radius.s))
     }
 
     private var footerView: some View {
@@ -300,7 +205,7 @@ struct PreFlightVisualizerView: View {
 
         // Run simulation in background
         let results = await Task.detached(priority: .userInitiated) {
-            var folderMap: [URL: [SimulatedFile]] = [:]
+            let tree = SimulatedFolderTree(baseDestination: plan.baseDestination)
             var stats = SummaryStats()
 
             for routed in plan.photos {
@@ -343,42 +248,200 @@ struct PreFlightVisualizerView: View {
                             destinationURL: destURL,
                             resolution: resolution
                         )
-                        folderMap[folder, default: []].append(file)
+                        tree.insert(file: file, relativeTo: plan.baseDestination)
                     }
                 }
             }
 
-            stats.foldersCreated = folderMap.keys.count
-            let sortedFolders = folderMap.map { SimulatedFolder(url: $0.key, files: $0.value) }
-                .sorted { $0.url.path < $1.url.path }
+            tree.sortTree()
+            stats.foldersCreated = tree.countFolders()
 
-            return (sortedFolders, stats)
+            return (tree.root, stats)
         }.value
 
-        self.folders = results.0
+        self.rootNode = results.0
         self.summaryStats = results.1
         self.isSimulating = false
     }
 }
 
+// MARK: - Recursive Folder Node View
+
+struct SimulatedFolderNodeView: View {
+    let node: SimulatedFolderTree.Node
+    @Binding var collapsedFolders: Set<URL>
+
+    private var isExpanded: Binding<Bool> {
+        Binding(
+            get: { !collapsedFolders.contains(node.url) },
+            set: { expand in
+                withAnimation(.smooth(duration: 0.15)) {
+                    if expand {
+                        collapsedFolders.remove(node.url)
+                    } else {
+                        collapsedFolders.insert(node.url)
+                    }
+                }
+            }
+        )
+    }
+
+    var body: some View {
+        DisclosureGroup(isExpanded: isExpanded) {
+            VStack(alignment: .leading, spacing: Theme.Space.s6) {
+                // Subfolders first
+                ForEach(node.childFolders) { child in
+                    SimulatedFolderNodeView(node: child, collapsedFolders: $collapsedFolders)
+                }
+
+                // Subfiles next
+                ForEach(node.files) { file in
+                    HStack(spacing: Theme.Space.s10) {
+                        Image(systemName: "doc")
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Color.textSecondary)
+                        
+                        Text(file.sourceURL.lastPathComponent)
+                            .font(Theme.Font.monoCaption)
+                            .foregroundStyle(Theme.Color.textPrimary)
+                        
+                        Spacer()
+                        
+                        if case .rename(let uniqueURL) = file.resolution {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.right")
+                                    .font(Theme.Font.caption2)
+                                    .foregroundStyle(Theme.Color.textTertiary)
+                                Text(uniqueURL.lastPathComponent)
+                                    .font(Theme.Font.monoCaption)
+                                    .foregroundStyle(Theme.Color.accent)
+                            }
+                        }
+
+                        resolutionPill(for: file.resolution)
+                    }
+                    .padding(.vertical, 3)
+                    .padding(.leading, 6)
+                }
+            }
+            .padding(.leading, 12)
+            .padding(.vertical, Theme.Space.s6)
+        } label: {
+            HStack(spacing: Theme.Space.s6) {
+                Image(systemName: "folder")
+                    .foregroundStyle(Theme.Color.accent)
+                    .font(.system(size: 11))
+                
+                Text(node.name)
+                    .font(Theme.Font.bodyBold)
+                    .foregroundStyle(Theme.Color.textPrimary)
+                
+                Spacer()
+                
+                Text("\(node.totalFilesCount) files")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Theme.Color.textSecondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule().fill(Theme.Color.overlaySoft)
+                    )
+            }
+            .padding(.vertical, 4)
+        }
+        .tint(Theme.Color.textSecondary)
+    }
+
+    private func resolutionPill(for resolution: CollisionResolution) -> some View {
+        let text = resolution.label
+        let color: Color
+        switch resolution {
+        case .normal:    color = Theme.Color.success
+        case .rename:    color = Theme.Color.accent
+        case .overwrite: color = Theme.Color.warning
+        case .skip:      color = Theme.Color.textTertiary
+        }
+
+        return Text(text)
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(Theme.Color.textInverse)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color, in: RoundedRectangle(cornerRadius: Theme.Radius.s))
+    }
+}
+
 // MARK: - Simulation Structures
 
-struct SimulatedFolder: Identifiable {
-    let id = UUID()
-    let url: URL
-    var files: [SimulatedFile]
-
-    func relativeDirectoryPath(base: URL) -> String {
-        let basePath = base.standardizedFileURL.path
-        let folderPath = url.standardizedFileURL.path
-        if folderPath.hasPrefix(basePath) {
-            let relative = String(folderPath.dropFirst(basePath.count))
-            if relative.hasPrefix("/") {
-                return String(relative.dropFirst())
-            }
-            return relative.isEmpty ? "/" : relative
+class SimulatedFolderTree {
+    class Node: Identifiable {
+        let id = UUID()
+        let name: String
+        let url: URL
+        var childFolders: [Node] = []
+        var files: [SimulatedFile] = []
+        
+        init(name: String, url: URL) {
+            self.name = name
+            self.url = url
         }
-        return url.lastPathComponent
+        
+        var totalFilesCount: Int {
+            return files.count + childFolders.reduce(0) { $0 + $1.totalFilesCount }
+        }
+    }
+    
+    let root: Node
+    
+    init(baseDestination: URL) {
+        self.root = Node(name: baseDestination.lastPathComponent, url: baseDestination.standardizedFileURL)
+    }
+    
+    func insert(file: SimulatedFile, relativeTo base: URL) {
+        let basePath = base.standardizedFileURL.path
+        let destPath = file.destinationURL.deletingLastPathComponent().standardizedFileURL.path
+        
+        guard destPath.hasPrefix(basePath) else {
+            root.files.append(file)
+            return
+        }
+        
+        let relativeString = String(destPath.dropFirst(basePath.count))
+        let components = relativeString.components(separatedBy: "/").filter { !$0.isEmpty }
+        
+        var current = root
+        var currentURL = base.standardizedFileURL
+        
+        for comp in components {
+            currentURL = currentURL.appendingPathComponent(comp)
+            if let existing = current.childFolders.first(where: { $0.name == comp }) {
+                current = existing
+            } else {
+                let newNode = Node(name: comp, url: currentURL)
+                current.childFolders.append(newNode)
+                current = newNode
+            }
+        }
+        
+        current.files.append(file)
+    }
+    
+    func sortTree() {
+        func sortNode(_ node: Node) {
+            node.childFolders.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            node.files.sort { $0.destinationURL.lastPathComponent.localizedStandardCompare($1.destinationURL.lastPathComponent) == .orderedAscending }
+            for child in node.childFolders {
+                sortNode(child)
+            }
+        }
+        sortNode(root)
+    }
+    
+    func countFolders() -> Int {
+        func count(node: Node) -> Int {
+            return node.childFolders.count + node.childFolders.reduce(0) { $0 + count(node: $1) }
+        }
+        return count(node: root)
     }
 }
 
