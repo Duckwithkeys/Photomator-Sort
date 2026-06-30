@@ -63,6 +63,16 @@ final class PhotoLibraryViewModel: ObservableObject {
         }
     }
     @Published private(set) var photoCaptions: [UUID: String] = [:]
+    /// XMP tag names read from on-disk sidecars that have no matching tag
+    /// in the currently active pack. Populated during metadata loading so
+    /// the Settings → XMP Tags pane can offer to import them.
+    @Published private(set) var orphanedXmpTagNames: Set<String> = []
+
+    /// Called by the Settings XMP Tags pane after the user imports a batch
+    /// of orphaned names into the active pack, so they disappear from the list.
+    func removeOrphanedXmpTagNames(_ names: Set<String>) {
+        orphanedXmpTagNames.subtract(names)
+    }
     @Published private(set) var visionSuggestionsCache: [UUID: [AutoTagSuggestion]] = [:]
     @Published var filterRule: PhotoFilterRule = .allPhotos {
         didSet {
@@ -723,6 +733,11 @@ final class PhotoLibraryViewModel: ObservableObject {
                 let tagIDs = Set(info.sidecarTags.compactMap { nameToID[$0.lowercased()] })
                 if !tagIDs.isEmpty {
                     batchTags[info.id] = tagIDs
+                }
+                // Collect any names that don't map to an active-pack tag
+                let unmatched = info.sidecarTags.filter { nameToID[$0.lowercased()] == nil }
+                if !unmatched.isEmpty {
+                    self.orphanedXmpTagNames.formUnion(unmatched)
                 }
             }
 

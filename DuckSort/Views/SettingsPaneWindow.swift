@@ -14,16 +14,18 @@ import AppKit
 enum SettingsTab: String, CaseIterable {
     case rules      = "Rules"
     case tags       = "Tags"
+    case xmpTags    = "XMP Tags"
     case copyright  = "Copyright"
     case shortcuts  = "Shortcuts"
     case autoTagging = "Mode Switching"
 
     var systemImage: String {
         switch self {
-        case .rules:     return "folder.badge.gearshape"
-        case .tags:      return "tag"
-        case .copyright: return "c.circle"
-        case .shortcuts: return "keyboard.badge.ellipsis"
+        case .rules:      return "folder.badge.gearshape"
+        case .tags:       return "tag"
+        case .xmpTags:    return "doc.badge.plus"
+        case .copyright:  return "c.circle"
+        case .shortcuts:  return "keyboard.badge.ellipsis"
         case .autoTagging: return "slider.horizontal.3"
         }
     }
@@ -55,6 +57,11 @@ struct SettingsPaneView: View {
                     )
                 case .tags:
                     SettingsTagsPaneView(
+                        viewModel: viewModel,
+                        tagStore: viewModel.tagStore
+                    )
+                case .xmpTags:
+                    SettingsXMPTagsPane(
                         viewModel: viewModel,
                         tagStore: viewModel.tagStore
                     )
