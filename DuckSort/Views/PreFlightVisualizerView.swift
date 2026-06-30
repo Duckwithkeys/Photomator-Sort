@@ -17,6 +17,7 @@ struct PreFlightVisualizerView: View {
     @State private var folders: [SimulatedFolder] = []
     @State private var isSimulating = true
     @State private var summaryStats = SummaryStats()
+    @State private var collapsedFolders: Set<URL> = []
 
     struct SummaryStats {
         var totalFiles = 0
@@ -172,48 +173,70 @@ struct PreFlightVisualizerView: View {
 
     private func folderSection(for folder: SimulatedFolder) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s8) {
-            // Simulated directory path header
-            HStack(spacing: Theme.Space.s6) {
-                Image(systemName: "folder")
-                    .foregroundStyle(Theme.Color.accent)
-                Text(folder.relativeDirectoryPath(base: plan.baseDestination))
-                    .font(Theme.Font.bodyBold)
-                    .foregroundStyle(Theme.Color.textPrimary)
-            }
-            .padding(.vertical, 4)
-            .padding(.horizontal, 8)
-            .background(Theme.Color.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: Theme.Radius.s))
-
-            // Subfiles mapped inside this folder
-            VStack(alignment: .leading, spacing: Theme.Space.s6) {
-                ForEach(folder.files) { file in
-                    HStack(spacing: Theme.Space.s10) {
-                        Image(systemName: "doc")
-                            .font(Theme.Font.caption)
-                            .foregroundStyle(Theme.Color.textSecondary)
-                        
-                        Text(file.sourceURL.lastPathComponent)
-                            .font(Theme.Font.monoCaption)
-                            .foregroundStyle(Theme.Color.textPrimary)
-                        
-                        Spacer()
-                        
-                        if case .rename(let uniqueURL) = file.resolution {
-                            HStack(spacing: 4) {
-                                Image(systemName: "arrow.right")
-                                    .font(Theme.Font.caption2)
-                                    .foregroundStyle(Theme.Color.textTertiary)
-                                Text(uniqueURL.lastPathComponent)
-                                    .font(Theme.Font.monoCaption)
-                                    .foregroundStyle(Theme.Color.accent)
-                            }
-                        }
-
-                        resolutionPill(for: file.resolution)
+            // Simulated directory path header (Clickable Button to Collapse/Expand)
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    if collapsedFolders.contains(folder.url) {
+                        collapsedFolders.remove(folder.url)
+                    } else {
+                        collapsedFolders.insert(folder.url)
                     }
-                    .padding(.leading, Theme.Space.s16)
-                    .padding(.vertical, 2)
                 }
+            } label: {
+                HStack(spacing: Theme.Space.s6) {
+                    Image(systemName: collapsedFolders.contains(folder.url) ? "chevron.right" : "chevron.down")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Theme.Color.textSecondary)
+                    Image(systemName: "folder")
+                        .foregroundStyle(Theme.Color.accent)
+                    Text(folder.relativeDirectoryPath(base: plan.baseDestination))
+                        .font(Theme.Font.bodyBold)
+                        .foregroundStyle(Theme.Color.textPrimary)
+                    Spacer()
+                    Text("\(folder.files.count) files")
+                        .font(Theme.Font.caption2)
+                        .foregroundStyle(Theme.Color.textTertiary)
+                }
+                .padding(.vertical, 6)
+                .padding(.horizontal, 8)
+                .contentShape(Rectangle())
+                .background(Theme.Color.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: Theme.Radius.s))
+            }
+            .buttonStyle(.plain)
+
+            if !collapsedFolders.contains(folder.url) {
+                // Subfiles mapped inside this folder
+                VStack(alignment: .leading, spacing: Theme.Space.s6) {
+                    ForEach(folder.files) { file in
+                        HStack(spacing: Theme.Space.s10) {
+                            Image(systemName: "doc")
+                                .font(Theme.Font.caption)
+                                .foregroundStyle(Theme.Color.textSecondary)
+                            
+                            Text(file.sourceURL.lastPathComponent)
+                                .font(Theme.Font.monoCaption)
+                                .foregroundStyle(Theme.Color.textPrimary)
+                            
+                            Spacer()
+                            
+                            if case .rename(let uniqueURL) = file.resolution {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "arrow.right")
+                                        .font(Theme.Font.caption2)
+                                        .foregroundStyle(Theme.Color.textTertiary)
+                                    Text(uniqueURL.lastPathComponent)
+                                        .font(Theme.Font.monoCaption)
+                                        .foregroundStyle(Theme.Color.accent)
+                                }
+                            }
+
+                            resolutionPill(for: file.resolution)
+                        }
+                        .padding(.leading, Theme.Space.s16)
+                        .padding(.vertical, 2)
+                    }
+                }
+                .transition(.opacity)
             }
         }
     }
