@@ -26,16 +26,39 @@ struct MetadataReader: Sendable {
             if let data = try? Data(contentsOf: url), let xmlString = String(data: data, encoding: .utf8) {
                 return parseXMPText(xmlString)
             }
-            return MetadataSnapshot()
+            // File system fallback for missing source
+            var snapshot = MetadataSnapshot()
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+               let fileCreationDate = attrs[.creationDate] as? Date {
+                snapshot.captureDate = fileCreationDate
+            }
+            return snapshot
         }
 
         let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any]
         let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any]
         let gps = properties[kCGImagePropertyGPSDictionary] as? [CFString: Any]
+        let iptc = properties[kCGImagePropertyIPTCDictionary] as? [CFString: Any]
 
         let cameraModel = tiff?[kCGImagePropertyTIFFModel] as? String
         let lensModel = exif?[kCGImagePropertyExifLensModel] as? String
-        let captureDateString = exif?[kCGImagePropertyExifDateTimeOriginal] as? String
+        
+        // Exif datetime -> TIFF datetime -> IPTC datetime
+        var captureDateString = exif?[kCGImagePropertyExifDateTimeOriginal] as? String
+            ?? tiff?[kCGImagePropertyTIFFDateTime] as? String
+        
+        if captureDateString == nil, let iptc = iptc {
+            if let dateStr = iptc[kCGImagePropertyIPTCDateCreated] as? String {
+                if let timeStr = iptc[kCGImagePropertyIPTCTimeCreated] as? String {
+                    captureDateString = "\(dateStr) \(timeStr)"
+                } else {
+                    captureDateString = dateStr
+                }
+            }
+        }
+        
+        var captureDate = captureDateString.flatMap(Self.parseExifDate)
+        
         let aperture = exif?[kCGImagePropertyExifFNumber] as? Double
         let shutterSpeed = exif?[kCGImagePropertyExifExposureTime] as? Double
         let isoArray = exif?[kCGImagePropertyExifISOSpeedRatings] as? [Int]
@@ -61,40 +84,39 @@ struct MetadataReader: Sendable {
 
         var rating: Int? = nil
         var pick: Int? = nil
-        if let iptc = properties[kCGImagePropertyIPTCDictionary] as? [CFString: Any] {
+        if let iptc = iptc {
             rating = iptc[kCGImagePropertyIPTCStarRating] as? Int
         }
+        
+        // Check embedded XMP
         if let metadata = CGImageSourceCopyMetadataAtIndex(source, 0, nil),
            let xmpData = CGImageMetadataCreateXMPData(metadata, nil) as Data?,
            let xmpString = String(data: xmpData, encoding: .utf8) {
 
+            let xmpSnapshot = parseXMPText(xmpString)
             if rating == nil {
-                if let match = Self.ratingAttrRegex.firstMatch(in: xmpString, options: [], range: NSRange(xmpString.startIndex..., in: xmpString)),
-                   let range = Range(match.range(at: 1), in: xmpString),
-                   let val = Int(xmpString[range]) {
-                    rating = val
-                } else if let match = Self.ratingTagRegex.firstMatch(in: xmpString, options: [], range: NSRange(xmpString.startIndex..., in: xmpString)),
-                          let range = Range(match.range(at: 1), in: xmpString),
-                          let val = Int(xmpString[range]) {
-                    rating = val
-                }
+                rating = xmpSnapshot.rating
             }
-
-            if let match = Self.pickAttrRegex.firstMatch(in: xmpString, options: [], range: NSRange(xmpString.startIndex..., in: xmpString)),
-               let range = Range(match.range(at: 1), in: xmpString),
-               let val = Int(xmpString[range]) {
-                pick = val
-            } else if let match = Self.pickTagRegex.firstMatch(in: xmpString, options: [], range: NSRange(xmpString.startIndex..., in: xmpString)),
-                      let range = Range(match.range(at: 1), in: xmpString),
-                      let val = Int(xmpString[range]) {
-                pick = val
+            if pick == nil {
+                pick = xmpSnapshot.pick
+            }
+            if captureDate == nil {
+                captureDate = xmpSnapshot.captureDate
+            }
+        }
+        
+        // Final File System Fallback
+        if captureDate == nil {
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+               let fileCreationDate = attrs[.creationDate] as? Date {
+                captureDate = fileCreationDate
             }
         }
 
         return MetadataSnapshot(
             cameraModel: cameraModel,
             lensModel: lensModel,
-            captureDate: captureDateString.flatMap(Self.parseExifDate),
+            captureDate: captureDate,
             aperture: aperture,
             shutterSpeed: shutterSpeed,
             iso: isoArray?.first,
@@ -186,20 +208,44 @@ struct MetadataReader: Sendable {
     }
 
     static func parseExifDate(_ string: String) -> Date? {
-        guard string.count >= 19 else { return nil }
-        let chars = Array(string.prefix(19))
-        guard chars[4] == ":", chars[7] == ":", chars[10] == " ", chars[13] == ":", chars[16] == ":" else {
-            return nil
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 10 else { return nil }
+
+        // Attempt 1: ISO8601 formatting (with/without fractional seconds or offsets)
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = isoFormatter.date(from: trimmed) {
+            return date
         }
+        
+        isoFormatter.formatOptions = [.withInternetDateTime]
+        if let date = isoFormatter.date(from: trimmed) {
+            return date
+        }
+
+        // Attempt 2: Direct numeric separator scanning (safely handles YYYY:MM:DD, YYYY-MM-DD, YYYY/MM/DD)
+        let chars = Array(trimmed)
         guard let year = Int(String(chars[0...3])),
               let month = Int(String(chars[5...6])),
-              let day = Int(String(chars[8...9])),
-              let hour = Int(String(chars[11...12])),
-              let minute = Int(String(chars[14...15])),
-              let second = Int(String(chars[17...18]))
+              let day = Int(String(chars[8...9]))
         else {
             return nil
         }
+
+        var hour = 0
+        var minute = 0
+        var second = 0
+
+        if chars.count >= 19 {
+            if let h = Int(String(chars[11...12])),
+               let m = Int(String(chars[14...15])),
+               let s = Int(String(chars[17...18])) {
+                hour = h
+                minute = m
+                second = s
+            }
+        }
+
         var dateComponents = DateComponents()
         dateComponents.year = year
         dateComponents.month = month
@@ -207,7 +253,7 @@ struct MetadataReader: Sendable {
         dateComponents.hour = hour
         dateComponents.minute = minute
         dateComponents.second = second
-        
+
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .current
         return calendar.date(from: dateComponents)
@@ -309,15 +355,45 @@ struct MetadataReader: Sendable {
         if let wStr = extractValue(forKeys: ["tiff:ImageWidth", "exif:PixelXDimension", "ImageWidth"]) { width = Int(wStr) }
         if let hStr = extractValue(forKeys: ["tiff:ImageLength", "exif:PixelYDimension", "ImageLength"]) { height = Int(hStr) }
 
+        // 8. Date created
+        var captureDate: Date? = nil
+        if let dateStr = extractValue(forKeys: ["exif:DateTimeOriginal", "xmp:CreateDate", "photoshop:DateCreated", "CreateDate", "DateTimeOriginal"]) {
+            captureDate = Self.parseExifDate(dateStr)
+        }
+
+        // 9. Star Rating
+        var rating: Int? = nil
+        if let match = Self.ratingAttrRegex.firstMatch(in: xml, options: [], range: NSRange(xml.startIndex..., in: xml)),
+           let range = Range(match.range(at: 1), in: xml),
+           let val = Int(xml[range]) {
+            rating = val
+        } else if let match = Self.ratingTagRegex.firstMatch(in: xml, options: [], range: NSRange(xml.startIndex..., in: xml)),
+                  let range = Range(match.range(at: 1), in: xml),
+                  let val = Int(xml[range]) {
+            rating = val
+        }
+
+        // 10. Pick/Reject Flags
+        var pick: Int? = nil
+        if let match = Self.pickAttrRegex.firstMatch(in: xml, options: [], range: NSRange(xml.startIndex..., in: xml)),
+           let range = Range(match.range(at: 1), in: xml),
+           let val = Int(xml[range]) {
+            pick = val
+        } else if let match = Self.pickTagRegex.firstMatch(in: xml, options: [], range: NSRange(xml.startIndex..., in: xml)),
+                  let range = Range(match.range(at: 1), in: xml),
+                  let val = Int(xml[range]) {
+            pick = val
+        }
+
         return MetadataSnapshot(
             cameraModel: cameraModel,
             lensModel: lensModel,
-            captureDate: nil,
+            captureDate: captureDate,
             aperture: aperture,
             shutterSpeed: nil,
             iso: iso,
-            rating: nil,
-            pick: nil,
+            rating: rating,
+            pick: pick,
             focalLength: nil,
             focalLengthIn35mm: focalLengthIn35mm,
             whiteBalance: nil,
