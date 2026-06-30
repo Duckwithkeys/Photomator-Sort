@@ -57,7 +57,11 @@ final class PhotoLibraryViewModel: ObservableObject {
     private func rebuildPhotoSetIndex() {
         photoSetIndex = Dictionary(uniqueKeysWithValues: photoSets.enumerated().map { ($1.id, $0) })
     }
-    @Published private(set) var photoMetadata: [UUID: MetadataSnapshot] = [:]
+    @Published private(set) var photoMetadata: [UUID: MetadataSnapshot] = [:] {
+        didSet {
+            photoDateCache.removeAll(keepingCapacity: true)
+        }
+    }
     @Published private(set) var photoCaptions: [UUID: String] = [:]
     @Published private(set) var visionSuggestionsCache: [UUID: [AutoTagSuggestion]] = [:]
     @Published var filterRule: PhotoFilterRule = .allPhotos {
