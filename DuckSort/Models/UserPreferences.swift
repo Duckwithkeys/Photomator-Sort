@@ -26,6 +26,29 @@ final class UserPreferences: ObservableObject {
         didSet { save() }
     }
 
+    /// Whether the auto-advance flow should fire a haptic pulse on
+    /// every rating / flag / tag change. Defaults to `false` so users
+    /// with non-Force-Touch trackpads aren't surprised by a system
+    /// sound. Has no effect unless `speedCullingEnabled` is also on.
+    @Published var autoAdvanceHapticEnabled: Bool = false {
+        didSet { save() }
+    }
+
+    /// Whether the auto-advance flow should play a short system sound
+    /// on every rating / flag / tag change. Defaults to `false`; this
+    /// is the reliable feedback channel for desktop Macs whose
+    /// trackpad doesn't support `NSHapticFeedbackManager`. Has no
+    /// effect unless `speedCullingEnabled` is also on.
+    @Published var autoAdvanceSoundEnabled: Bool = false {
+        didSet { save() }
+    }
+
+    /// Hotkey the user can press to toggle the master auto-advance
+    /// switch without opening Settings. `nil` = no binding.
+    @Published var autoAdvanceToggleHotkey: String? = nil {
+        didSet { save() }
+    }
+
     // MARK: - Auto Tagging
 
     /// Master toggle for auto-tagging. When enabled, suggestions are
@@ -91,6 +114,9 @@ final class UserPreferences: ObservableObject {
         static let showAdvancedEXIF = "showAdvancedEXIF"
         static let activeTagPackID = "activeTagPackID"
         static let speedCullingEnabled = "speedCullingEnabled"
+        static let autoAdvanceHapticEnabled = "autoAdvanceHapticEnabled"
+        static let autoAdvanceSoundEnabled = "autoAdvanceSoundEnabled"
+        static let autoAdvanceToggleHotkey = "autoAdvanceToggleHotkey"
 
         // Auto tagging
         static let autoTaggingEnabled = "autoTaggingEnabled"
@@ -142,6 +168,9 @@ final class UserPreferences: ObservableObject {
         UserDefaults.standard.set(showAdvancedEXIF, forKey: Keys.showAdvancedEXIF)
         UserDefaults.standard.set(activeTagPackID, forKey: Keys.activeTagPackID)
         UserDefaults.standard.set(speedCullingEnabled, forKey: Keys.speedCullingEnabled)
+        UserDefaults.standard.set(autoAdvanceHapticEnabled, forKey: Keys.autoAdvanceHapticEnabled)
+        UserDefaults.standard.set(autoAdvanceSoundEnabled, forKey: Keys.autoAdvanceSoundEnabled)
+        UserDefaults.standard.set(autoAdvanceToggleHotkey, forKey: Keys.autoAdvanceToggleHotkey)
 
         // Auto tagging
         UserDefaults.standard.set(autoTaggingEnabled, forKey: Keys.autoTaggingEnabled)
@@ -181,6 +210,9 @@ final class UserPreferences: ObservableObject {
         isInspectorOpen = UserDefaults.standard.bool(forKey: Keys.isInspectorOpen)
         showAdvancedEXIF = UserDefaults.standard.bool(forKey: Keys.showAdvancedEXIF)
         speedCullingEnabled = UserDefaults.standard.bool(forKey: Keys.speedCullingEnabled)
+        autoAdvanceHapticEnabled = UserDefaults.standard.bool(forKey: Keys.autoAdvanceHapticEnabled)
+        autoAdvanceSoundEnabled = UserDefaults.standard.bool(forKey: Keys.autoAdvanceSoundEnabled)
+        autoAdvanceToggleHotkey = UserDefaults.standard.string(forKey: Keys.autoAdvanceToggleHotkey)
         activeTagPackID = UserDefaults.standard.string(forKey: Keys.activeTagPackID) ?? TagPack.defaultPackID
 
         // Auto tagging
@@ -214,6 +246,9 @@ final class UserPreferences: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Keys.showAdvancedEXIF)
         UserDefaults.standard.removeObject(forKey: Keys.activeTagPackID)
         UserDefaults.standard.removeObject(forKey: Keys.speedCullingEnabled)
+        UserDefaults.standard.removeObject(forKey: Keys.autoAdvanceHapticEnabled)
+        UserDefaults.standard.removeObject(forKey: Keys.autoAdvanceSoundEnabled)
+        UserDefaults.standard.removeObject(forKey: Keys.autoAdvanceToggleHotkey)
 
         // Auto tagging
         UserDefaults.standard.removeObject(forKey: Keys.autoTaggingEnabled)
@@ -238,6 +273,9 @@ final class UserPreferences: ObservableObject {
         isInspectorOpen = false
         showAdvancedEXIF = false
         speedCullingEnabled = false
+        autoAdvanceHapticEnabled = false
+        autoAdvanceSoundEnabled = false
+        autoAdvanceToggleHotkey = ""
         activeTagPackID = TagPack.defaultPackID
 
         // Auto tagging

@@ -1,45 +1,842 @@
-DUCKSORT BACK-END ARCHITECTURAL TEARDOWN & SECURITY AUDIT
+DUCKSORT – CONCRETE OPTIMIZATION & FEATURE SUGGESTIONS
+=====================================================
+(Reviewed against the actual DuckSort Swift/SwiftUI codebase under DuckSort/.
+ The previous Suggestions.txt was generic server-side advice and does not
+ apply to this local-only macOS app.)
 
-Prepared by: Senior Back-End Architect & Security Engineering
+──────────────────────────────────────────────────────
+1. THUMBNAIL PIPELINE (ThumbnailView / ThumbnailService)
+──────────────────────────────────────────────────────
 
-1. PERFORMANCE & LATENCY
-Synchronous EXIF Extraction & Heavy Processing:
-If your backend processes images synchronously upon upload, your worker nodes will choke immediately. EXIF extraction via naive libraries often reads the entire file into memory instead of streaming header blocks. For high-resolution RAW and 4K images, decoding pixels on the primary API thread will block event loops and exhaust CPU limits. You must offload thumbnail generation and EXIF reading to asynchronous serverless workers or dedicated background job queues (like SQS with auto-scaling worker pools).
+a) The "dynamic LOD" preload in ThumbnailView.swift:74-84 is mostly dead code
+   in the common case. `ScrollStateObserver.shared.isScrolling` is only true
+   while the user is actively scrolling, but `.task(id: url)` is started on
+   *first appearance* of every cell — by the time the user scrolls fast
+   enough for `isScrolling == true`, the first thumbnail tasks for already-
+   visible cells have already started. And once a task begins, it requests
+   the *full* 600px size on line 88 immediately, ignoring whether the
+   128px proxy is even useful. Practical fix: pass `size` as a *requested
+   max* and let the cache key include the size, then prefer the cached
+   small proxy over re-decoding. Today every cell decode targets 600px
+   unconditionally.
 
-Thumbnail Generation Overhead:
-Generating multiple thumbnail resolutions on-the-fly without an aggressive edge CDN caching layer will destroy your compute budget. Image resizing is CPU-bound; doing it repeatedly per request is architectural suicide. Thumbnails must be generated once asynchronously, stored in object storage with immutable content-hash keys, and served strictly via a global CDN.
+b) ThumbnailCache uses `url.standardizedFileURL as NSURL` as the NSCache
+   key, but insert uses the *un-standardized* `url` (ThumbnailView.swift:88
+   → ThumbnailService.decode path) — actually look: `ThumbnailCache.global
+   .insert(ns, for: url)` and `image(for: url)` both call
+   `url.standardizedFileURL` internally, so the keys DO match. But the
+   *hit path* in `ThumbnailView.task` (line 66) reads the cache with the
+   un-standardized URL and `ThumbnailService.thumbnail(for:)` (line 122)
+   also reads before standardizing. So far OK — but the cell's
+   `preferredPreviewURL` is a `file:///...` URL produced by the file
+   enumerator which is already standardized. There's a subtle risk if a
+   relative path sneaks in. Add a unit test that round-trips a non-
+   standardized URL through the cache to lock the invariant.
 
+c) The `AsyncSemaphore` cancel path (ThumbnailView.swift:298-308) resumes
+   "the last" waiter with CancellationError when a waiter is cancelled,
+   which is correct only for the specific task that was just cancelled.
+   For tasks that were scheduled *after* a cancelled waiter and get their
+   place in line, this can resume the wrong continuation. Use a unique
+   `UUID` per continuation stored in the waiters array, or use Swift's
+   `AsyncSemaphore` from swift-async-algorithms. For 32-way concurrency on
+   local files the impact is small but the bug is real.
 
-2. DATABASE & INDEXING
-Scaling to Millions of Photos:
-Storing photo metadata in a monolithic relational table without partitioning will cause query degradation at scale. Queries filtering across combinations of date ranges, geographic bounding boxes, and arbitrary user tags will result in full table scans unless multi-column composite indexes and spatial indexing (such as PostGIS or QuadTrees) are configured properly.
+d) The 600px request happens for *every* cell, including ones already
+   loaded at the same size. NSImage creation is non-trivial; the cache
+   helps but only after the first decode. A prefetch pass on the visible
+   viewport (e.g. 2 viewport-heights ahead) would dramatically reduce
+   "popcorn" on first scroll. Use `LazyVGrid.onAppear` to schedule a
+   `.task` on neighbours.
 
-Pagination Flaws:
-Offset-based pagination (OFFSET 100000 LIMIT 50) is fundamentally broken for large datasets. As offset increases, database engines must scan and discard thousands of rows, leading to linear latency spikes. You must enforce cursor-based pagination (keyset pagination) using indexed columns like creation timestamp and unique photo ID.
+e) `Task.checkCancellation()` is called many times but the semaphore's
+   `acquire()` swallows the error and returns `nil` on cancel. That
+   means a cancelled grid cell that lost its race will silently fall
+   back to a missing thumbnail rather than the previous image — the
+   `loader.image = nil` on line 71 should be `loader.image = loader
+   .image ?? nil` (no-op) so cancelled cells don't flash the placeholder
+   icon while scrolling.
 
+f) The fallback "loadWithNSImage" path (ThumbnailView.swift:206-231)
+   decodes the *full* HEIF into an NSImage and then resizes on CPU via
+   `lockFocus` / `draw`. For a 12 MP HEIF that's ~50 MB of pixel data
+   round-tripped through the main rasteriser. Use `CGImageSource
+   .createThumbnail(at:)` for HEIF too — it has an embedded preview
+   and the same ImageIO path is significantly faster than NSImage.
 
-3. STORAGE & I/O
-Upload Pipeline Bottlenecks:
-Routing file uploads directly through your application API servers wastes bandwidth, memory, and application connections. API servers should never proxy heavy binary data. Use presigned S3/GCS URLs for direct client-to-bucket uploads, combined with multipart upload protocols for large media files.
+──────────────────────────────────────────────────────
+2. METADATA READER (Utilities/MetadataReader.swift)
+──────────────────────────────────────────────────────
 
-Cloud Storage Costs:
-Keeping full-resolution uncompressed photos in hot storage tiers indefinitely will bankrupt the operation. Implement lifecycle management policies to move infrequently accessed originals to cold storage (e.g., S3 Glacier Flexible / Instant Retrieval) while serving everyday previews from warm storage tiers and edge caches.
+a) `metadata(for:)` is a synchronous, non-isolated function that does
+   *blocking* file I/O (`Data(contentsOf:)` for XMP files, plus
+   CGImageSource calls). It is called from `loadBatchMetadataAndTags`
+   inside a `withTaskGroup`, but the `metadataReader` is a plain struct
+   on `@MainActor` (PhotoLibraryViewModel.swift:276). The
+   `group.addTask` closure runs on a background task, but because
+   `metadataReader` is captured from the MainActor isolated context,
+   each call still implicitly hops through MainActor for the
+   `metadataReader.metadata(for: url)` call when the closure awaits.
+   This *eliminates* the parallelism the task group was meant to
+   provide. Fix: mark `MetadataReader.metadata(for:)` as `nonisolated`
+   and make the struct `Sendable` (it already is), then call it
+   without `await` inside the group.
 
+b) `parseXMPText` recompiles a fresh `NSRegularExpression` *per call*
+   for every `extractValue` invocation (MetadataReader.swift:266, 273).
+   For a 1,500-photo scan that's ~30,000 regex compilations. Promote
+   the patterns to `static let`s the same way `ratingAttrRegex` and
+   friends already are on lines 10-13. The XMPTaggingService file has
+   the exact same anti-pattern (the comment block at the top of
+   XMPTaggingService.swift notes a similar fix was applied there but
+   not for `parseXMPText`).
 
-4. SECURITY & PRIVACY
-Insecure Direct Object References (IDOR):
-If photo URLs or API endpoints rely on sequential integer IDs or predictable hash schemes without validating object-level ownership, unauthorized users can iterate through keys and access private user photos. Every request for image data or metadata must enforce strict tenant isolation and cryptographic authorization checks at the database/middleware layer.
+c) `parseExifDate` (MetadataReader.swift:209-259) creates a *new*
+   `ISO8601DateFormatter` and a *new* `Calendar` on every invocation.
+   Both are expensive to construct. Make them `static let`.
 
-Data Leakage via EXIF Metadata:
-Exposing raw EXIF metadata directly to public or shared links leaks highly sensitive PII, including exact GPS coordinates, camera serial numbers, and home location patterns. EXIF metadata must be sanitized or stripped upon public sharing, keeping private metadata accessible strictly to the authenticated asset owner.
+d) `try? Data(contentsOf: url)` for an XMP sidecar reads the *entire*
+   file into memory even when ImageIO's CGImageSource already returns
+   the XMP packet via `CGImageMetadataCreateXMPData`. For an embedded
+   XMP block inside a JPEG this is the *only* path (line 17), so the
+   fallback is unavoidable, but the *primary* XMP path (line 25) is
+   used for plain XMP sidecar files and could stream the XML reader
+   (XMLParser) instead of `Data(contentsOf:)`. For a 200 KB sidecar
+   the difference is small; for a 5 MB sidecar it's not.
 
-Insecure Presigned URLs:
-Generating presigned URLs with long expiration windows allows leaked URLs to be accessed indefinitely by unauthorized third parties. Presigned URLs for viewing or downloading must have tight expiration windows (e.g., 5 to 15 minutes) and be bound to restricted IP ranges or user sessions where feasible.
+e) The `parseXMPText` helper duplicates the regex-based XMP parser
+   that already exists in `XMPTaggingService` for the *write* side.
+   Two regex-based XMP parsers in the same app is a maintenance trap.
+   Extract a shared `XMPDocument` (or use Apple's `CMMetadata`) and
+   have both readers go through it.
 
+──────────────────────────────────────────────────────
+3. TRANSFER PIPELINE (FileTransferService / RoutedTransferService)
+──────────────────────────────────────────────────────
 
-5. ALGORITHMIC EFFICIENCY
-Clustering and Duplicate Detection:
-Performing perceptual hashing or visual feature extraction in real-time inside request-response cycles is completely unviable. Spatial clustering algorithms like DBSCAN or K-Means for location grouping must not run on raw coordinates during database reads; pre-aggregate geohashes or spatial clusters offline in batch pipelines.
+a) Both `FileTransferService` and `RoutedTransferService` define their
+   *own* `chunkedFileSizes` / `chunkedTotalBytes` (FileTransferService
+   .swift:237-266, RoutedTransferService.swift:263-288). Same algorithm,
+   same constants, different name. Extract a shared
+   `TransferSizePrecomputer` so the chunking heuristic lives in one
+   place. Today changing the chunk-size policy requires touching two
+   files in lockstep.
 
-Naive Photo Sorting:
-Sorting large libraries by complex multi-variable rankings (e.g., visual similarity, face detection clusters, and chronological metadata) at query time will melt database nodes. All sorting indexes, tag associations, and cluster memberships must be pre-calculated and stored in dedicated search indices (like OpenSearch or Elasticsearch) rather than dynamically joined across relational tables on every user request.
+b) `RoutedTransferService.execute` builds a `routingResults` array,
+   then iterates it *twice more* (phases 1 and 4, lines 77-83 and
+   102-119) to build the job list. The first iteration is a pure
+   projection of `(routingResults → walkItems)` and the second is
+   `(routingResults → jobs)`. For a routed plan that produces 5
+   folders per photo × 1,500 photos × 3 files per set = 22,500 jobs,
+   this is 22,500 closure captures and 22,500 `RoutedJob` initialisers
+   even though the work is trivial. Build `walkItems` and `jobs` in
+   a single pass.
+
+c) `routedTransfer.execute` phase 4 (line 102) iterates
+   `routingResults` then iterates `result.folders` then iterates
+   `routed.photoSet.allFiles`. The "outermost loop" should be the
+   per-folder destination, not the per-photo routing result. Today
+   if 1,500 photos each have 1 destination, the same `photoSet` is
+   read 1,500 times for `mediaSet` computation. Hoist the per-photo
+   precomputation out of the per-folder loop.
+
+d) The progress reporting closure is `await progress?(...)` on
+   every file completion (RoutedTransferService.swift:150,
+   FileTransferService.swift:147). With 1,500 files the await is
+   cheap but the closure allocates a new `FileOperationProgress`
+   struct every time. Throttle to ~20 updates/sec with a
+   `ContinuousClock` check; UI can't render 60 progress bars per
+   second anyway.
+
+e) For `.move` operations, `FileManager.moveItem` will fail across
+   volumes. Detect that and fall back to `copyItem` + `removeItem`
+   explicitly, with a clear status message. Today the user just sees
+   a generic error.
+
+f) Sidecar writing uses the *same* `XMPTaggingService()` instance
+   per call site. Since it's now a `Sendable` stateless struct
+   (per the comment at the top of XMPTaggingService.swift:14-18) you
+   don't need `localSidecarService = self.sidecarService` indirection
+   in both transfer services. Just declare `let xmpTagging =
+   XMPTaggingService()` in the task group and pass it in. Removes
+   the actor-isolation dance.
+
+g) `RoutedTransferService.execute` pre-creates directories
+   *sequentially* (line 91) before the parallel copy phase. For a
+   plan that fans out to 5 folders per photo, that's
+   `foldersPerPhoto × photoCount` sequential `createDirectory`
+   calls. Group unique destinations into a `Set<URL>` first, then
+   `withTaskGroup` over them.
+
+──────────────────────────────────────────────────────
+4. SIDEBAR / FOLDER INDEX (PhotoLibraryViewModel.rebuildFolderIndex)
+──────────────────────────────────────────────────────
+
+a) The current implementation walks every ancestor of every folder
+   (lines 2138-2157) and allocates a new `Set` per parent (`var
+   bucket = childAccum[parentPath, default: Set()]`). For a deep
+   tree with 1,500 photos across 50 folders, that's 50×depth
+   allocations. Replace the inner `Set` mutation with a
+   direct dictionary update:
+       childAccum[parentPath, default: []].insert(current.path)
+   and the final materialisation in lines 2166-2170 is a no-op since
+   dictionaries-of-arrays would already be sorted if you used
+   ordered insertion.
+
+b) `updateGlobalCounts` does an O(n × t) scan (n photos × t tags per
+   photo) for the tag histogram on every filter change because
+   `updateDerivedState` → `updateGlobalCounts` runs from `photoSets
+   .didSet`. With 1,500 photos and 5 tags each that's 7,500
+   `tagStore.assignedTagIDs(for:)` lookups, each of which appears
+   to hit a dictionary internally. Build `cachedTagCounts`
+   incrementally inside `setTagsBatch` / `removeTagFromAllSets`
+   instead.
+
+c) `editedCount` and `uneditedCount` are also recomputed in
+   `updateGlobalCounts` (line 2044). They could be maintained
+   incrementally in the same `photoSet.hasEdit` setters if those
+   existed. As-is, every filter UI tweak re-scans all photo sets.
+
+d) `rebuildFolderIndex` runs from `updateGlobalCounts` (line 2117),
+   which runs from `photoSets.didSet` (line 38), which runs from
+   `applyMetadataAndTagResults` (line 773). Loading metadata for
+   1,500 photos in two batches (lines 654-668) triggers two
+   full folder-index rebuilds. Defer the rebuild to a debounced
+   `Task` after both batches finish.
+
+──────────────────────────────────────────────────────
+5. FILTERING (PhotoLibraryViewModel.updateDerivedState)
+──────────────────────────────────────────────────────
+
+a) `photoDate(for:)` is called twice in the date range filter
+   (line 1957) and twice more in the sort (lines 1982-1983). For
+   1,500 photos that's 6,000 dictionary lookups on `photoMetadata`
+   per filter change. Build a `[UUID: Date]` cache keyed by
+   `photoSet.id` at the top of `updateDerivedState` and reuse it
+   for both the filter and the sort. The cache should be
+   invalidated by the existing `photoMetadata.didSet` (line 62).
+
+b) The standard search bar's text query (line 1843) is
+   `lowercased()`'d on every filter pass, and then
+   `photoSet.baseName.lowercased()` is called per photo (line
+   1965). Pre-compute a `lowercasedBaseName` once per photo set
+   in the cache above. `localizedStandardCompare` on line 1979
+   is also expensive; consider a single `Int` ordinal cache.
+
+c) `filterStartDate` / `filterEndDate` are `@Published Date`s
+   with no debounce. The Date pickers fire `didSet` on every
+   stepper tick. Even with the existing 120ms debounce on
+   `searchText`, the date pickers do not debounce. Add the
+   same Combine debounce to both dates (or coalesce them
+   into a single `dateFilter` struct).
+
+d) The subfolder-prefix check on lines 1871-1883 calls
+   `fileURL.standardizedFileURL.path` per photo. This is
+   re-evaluated on every filter change. Cache the parent
+   directory path on the photo set.
+
+e) The `for photoSet in photoSets` loop evaluates ~9 filter
+   predicates per photo, each with its own `if isFilterPopoverEnabled
+   && X { ... }` short-circuit. The boolean evaluation order
+   currently checks `isFilterPopoverEnabled` *after* the
+   `hasTagFilter` check (line 1887), which is fine, but the
+   `isFilterPopoverEnabled` value never changes between filter
+   runs. Hoist it to a local `let` and the `filterRule` switch
+   into a single early `if !filterRule.matches` check (already
+   there) and you'll cut ~5% off the per-photo cost.
+
+──────────────────────────────────────────────────────
+6. PREFS / PERSISTENCE (UserPreferences.swift)
+──────────────────────────────────────────────────────
+
+a) Every `didSet` on a `@Published` `@MainActor` property (lines
+   25, 33, 39) calls `save()`. The `save()` debounce is 150ms
+   (line 123), but if the user types into the IPTC creator
+   name field, every keystroke fires the `didSet` *and* the
+   debounce timer. That's correct, but the underlying
+   `UserDefaults.standard.set(...)` calls (lines 137-162) all
+   hit the same defaults database. For one or two writes this
+   is fine, but the full `performSave` writes 20+ keys every
+   cycle. Track a `dirtyKeys: Set<Keys>` and only flush
+   changed ones.
+
+b) `lastSourceDirectoryIDs` is persisted as a `[String]` of
+   raw `path`s, not bookmark data. After macOS 10.6 the
+   security-scoped bookmark API is the only reliable way to
+   re-resolve a folder across launches. Today the app
+   works because the user grants access each time, but
+   the saved paths become stale when the user moves their
+   Photos library. Convert to `URL.bookmarkData(options:
+   .withSecurityScope)` and re-resolve on launch.
+
+c) The `saveTask` (line 118) is a strong `Task` reference
+   that's not weak. If `UserPreferences.shared` is ever
+   deallocated mid-save, the task is cancelled but the
+   `self` capture is still strong. Make it `weak self` or
+   use a `Set<AnyCancellable>` with `.debounce`.
+
+d) `clear()` (line 207) writes all 20+ defaults but does
+   NOT call `save()` or `performSave()`. The next `save()`
+   call will only flush the changed ones, leaving stale
+   `embedIPTCInExports` etc. visible in `UserDefaults.standard
+   .dictionaryRepresentation()`. Add a `save()` at the end of
+   `clear()` or a flag to force a full flush.
+
+──────────────────────────────────────────────────────
+7. EXIF SANITIZER (Utilities/EXIFSanitizer.swift)
+──────────────────────────────────────────────────────
+
+a) `sanitizeImage` re-encodes the *full image* through
+   `CGImageDestination` even when the user only wants to
+   strip GPS coordinates. For a 50 MB RAF this is a 5-15
+   second operation that the user almost certainly didn't
+   intend. Add a fast path: if the only request is
+   `stripLocation`, open the file, modify the
+   `kCGImagePropertyGPSDictionary` in place via
+   `CGImageSourceCopyPropertiesAtIndex` → `mutableCopy` → write
+   the *unchanged* image data back, skipping pixel decoding.
+   On JPEG this is microseconds.
+
+b) There's no UI surface for `EXIFSanitizer` — it's a
+   utility with no caller. Either wire it into Settings
+   (a "Sanitize exports" toggle) or remove it.
+
+c) The function decodes *and* re-encodes the image even
+   for `stripCameraInfo = false, stripLocation = false`,
+   which is a no-op semantically but still triggers
+   CGImageDestinationFinalize. Early-return when both
+   flags are false.
+
+d) For RAW files (`.raf`, `.arw`, `.nef`, etc.) ImageIO
+   can write the metadata back without re-decoding pixels
+   via `CGImageDestinationCopySourceOptions`. Not currently
+   used.
+
+──────────────────────────────────────────────────────
+8. PHOTOINDEXSTORE (Utilities/PhotoIndexStore.swift)
+──────────────────────────────────────────────────────
+
+a) The store is created and never used outside the file
+   itself (a grep shows no callers in the rest of the
+   codebase). Either delete it or wire it into the
+   filtering pipeline. As-is it's dead code that adds
+   a maintenance burden and a 6th file in the Utilities
+   directory.
+
+b) The `geohash` function is private and not used
+   anywhere in the file. If the store isn't wired up,
+   both the function and the entire spatial-bin subsystem
+   are dead.
+
+c) The store uses an `@unchecked Sendable` class with a
+   `NSLock`. A `struct` snapshot returned by value, or
+   an `actor`, would be safer. The current design allows
+   a `clear()` to race with an in-flight `index()` on
+   another thread.
+
+──────────────────────────────────────────────────────
+9. UI / SWIFTUI
+──────────────────────────────────────────────────────
+
+a) `PhotoGridView.cell(for:photoSet:)` is wrapped in
+   `EquatableView` (line 177), which is correct, but
+   the inner `PhotoSetCell` body uses `@State private
+   var isHovered` so the `EquatableView` can't
+   short-circuit on hover state. Each hover re-evaluates
+   the entire cell body. Use `.equatable()` modifier
+   on the inner view *after* the hover-aware parts are
+   split out, or accept the cost and remove
+   `EquatableView`.
+
+b) `PhotoGridView` re-computes `columns` (line 24) on
+   every body re-evaluation. It's a `[GridItem]` of one
+   element, but the array allocation still happens. Make
+   it a static `let`.
+
+c) `viewModel.assignedTags(for: photoSet)` (line 179)
+   hits the `tagStore` on every cell render. With 1,500
+   visible cells, that's 1,500 dictionary lookups per
+   grid redraw. Add a `[PhotoSet.ID: [CustomTag]]` cache
+   to the view model, invalidated by `tagStore.$tags`.
+
+d) `PhotoSetCell.metadataBar` re-runs `tag.color`
+   resolution (line 204) on every redraw. `CustomTag`
+   is a struct, so SwiftUI re-evaluates its
+   `body` accessor. Consider making `CustomTag` an
+   `ObservableObject` only if tag colors change at
+   runtime, otherwise mark it as `Equatable` and use
+   `EquatableView` for the pills.
+
+e) `LargeImageViewerSidebar` likely re-reads the
+   viewmodel's metadata on every keystroke during
+   caption edit. Add `.onChange(of: caption)` to skip
+   the rebuild for unchanged text.
+
+f) The `withAnimation(.spring(...))` wrapping on line
+   1992 of PhotoLibraryViewModel animates the
+   *replacement* of `filteredPhotoSets` (1,500 items)
+   on every filter change. With `LazyVGrid`, the
+   animation only matters for items that are visibly
+   re-positioned, but the cost of `withAnimation` is
+   proportional to the diff size, not the visible
+   cells. Consider diffing the old vs new
+   `filteredPhotoSets` and only animating the cells
+   that actually moved.
+
+──────────────────────────────────────────────────────
+10. TAG / STORE
+──────────────────────────────────────────────────────
+
+a) `tagStore.assignedTagIDs(for:)` is called in
+   `updateGlobalCounts` (line 2067) inside an O(n)
+   loop. With 1,500 photos × 4 tags each, that's 6,000
+   dictionary lookups. The result is then used to
+   build a histogram and never for a per-photo
+   decision. Iterate the store's underlying
+   `tagToPhotoSets` map once instead.
+
+b) The `tagStore` snapshot sink at lines 295-310
+   dispatches `updateGlobalCounts` + `updateDerivedState`
+   + `objectWillChange.send()` on every tag change.
+   Three SwiftUI updates per tag add. For a 20-tag
+   bulk apply, that's 60 frame ticks. Combine into
+   a single `objectWillChange.send()` and call
+   `updateGlobalCounts` once with a flag.
+
+c) `syncActivePackFromStore` is debounced 200ms
+   (lines 317, 324) but `tagStore.objectWillChange`
+   is *not* — see the sink above. The debounce on
+   one and not the other means the user sees
+   intermediate states (e.g. counts briefly show
+   19 instead of 20 tags). Apply the same debounce
+   to both.
+
+──────────────────────────────────────────────────────
+11. TESTS
+──────────────────────────────────────────────────────
+
+a) The Tests directory has 11 test files, but
+   `PhotoIndexStore`, `MetadataReader.parseXMPText`,
+   `EXIFSanitizer`, `RoutedTransferService`, the
+   `LargeImageLoader.preload` path, and the
+   `rebuildFolderIndex` are all untested. Add
+   coverage especially for the regex-based XMP
+   parser (currently the most likely source of
+   "why did my XMP tag disappear" bugs).
+
+b) `SmokeTests.swift` and the rest of the test files
+   should be wired into a `make test` target in the
+   Xcode project. The presence of `Tests/` without
+   an explicit scheme target means CI / `xcodebuild`
+   will silently skip them.
+
+c) `FolderIndexingTests` exists but no test asserts
+   that `rebuildFolderIndex` produces a *correct*
+   recursive count for a deeply nested structure.
+   Add a tree with at least 5 levels and 100 photos
+   spread across siblings and assert the
+   `recursivePhotoCountIndex` matches the brute-force
+   sum.
+
+──────────────────────────────────────────────────────
+12. UX / FEATURE ADDITIONS (low-risk, high-value)
+──────────────────────────────────────────────────────
+
+a) Add an "Undo Last Transfer" action that uses the
+   already-computed `TransferSummary` to roll back
+   the most recent copy/move. The destination paths
+   are all known; the source paths are known for
+   `.move`. Store the summary in a small
+   `TransferHistory` (max 10 entries) on
+   `UserPreferences`.
+
+b) Show a per-photo "Last Modified" timestamp in the
+   inspector. `photoSet` already has
+   `mediaFiles[0].resourceValues(forKeys: [.contentModificationDateKey])`
+   cached by the scanner; surface it in the sidebar.
+
+c) Add a "Reveal in Finder" multi-select action for
+   the selection. Today only the *focused* photo
+   set can be revealed (PhotoSetCell.swift:138).
+
+d) Quick Look preview from the grid (spacebar).
+   Add a `.keyboardShortcut(.space)` modifier to
+   `PhotoGridView` that calls
+   `QLPreviewPanel.shared().makeKeyAndOrderFront(nil)`
+   with a `QLPreviewItem` adapter for the focused
+   photo's `preferredPreviewURL`.
+
+e) Export presets: a one-click "Export with current
+   rules" hotkey that runs the routed transfer with
+   the user's last-saved rule, no UI. Useful for
+   SD-card-ingest → lightroom workflows.
+
+f) Per-photo "Open in External Editor" using the
+   `photoSet.editPath` (the `.photo-edit` bundle).
+   Today the file is moved/copied but never opened
+   externally. Wire to `NSWorkspace.shared.open()`
+   on the `.photo-edit` URL.
+
+g) Drag-to-add-tags: let the user drag a tag pill
+   from the sidebar onto a photo cell to assign
+   it. Today assignment requires the tag manager
+   or the keyboard shortcut.
+
+h) "Sticky selection" mode: keep the selection
+   across filter changes (currently every
+   `updateDerivedState` re-derives
+   `selectedPhotoSets` from
+   `photoSets.filter(\.isSelected)` so a filter
+   that hides selected photos effectively
+   un-selects them from the toolbar's
+   perspective). Add a toggle in the toolbar
+   for "Keep selection across filters".
+
+i) Add a "Compare Two Photos" hotkey (`\`) that
+   selects the focused photo and waits for the
+   next click to mark it as the comparison anchor.
+   Useful for A/B'ing edits.
+
+j) Persistent inspector: the inspector pane is a
+   popover that disappears on outside click. Add
+   a "Pin Inspector" toggle so it stays open
+   while the user navigates.
+
+──────────────────────────────────────────────────────
+13. ARCHITECTURE / REFACTOR (medium-risk, long-term)
+──────────────────────────────────────────────────────
+
+a) `PhotoLibraryViewModel` is 2,393 lines. It's
+   doing filter rules, sorting, folder indexing,
+   transfer orchestration, metadata caching, tag
+   management glue, and keyboard shortcut
+   registration. Extract:
+     - `FilterPipeline` (the 160-line
+       `updateDerivedState` body)
+     - `FolderTreeIndex` (the 50-line
+       `rebuildFolderIndex` + supporting state)
+     - `SelectionState` (selection sets, anchor,
+       range select)
+   …each as a separate `@MainActor` class owned
+   by the view model. This will also make
+   `updateDerivedState` testable in isolation.
+
+b) `XMPTaggingService` is a `struct` for a
+   "service" (846 lines). Split the file:
+     - `XMPDocument.swift` (parser, regex tables)
+     - `XMPWriter.swift` (sidecar emission)
+     - `XMPTaggingService.swift` (orchestration)
+
+c) Two distinct transfer services exist
+   (`FileTransferService` and
+   `RoutedTransferService`) with overlapping
+   state and logic. Consider a single
+   `TransferService` with two strategies
+   (`.flat`, `.routed(rule:)`). The view model
+   could then pick the strategy based on
+   whether a route is configured.
+
+d) The view model captures services as
+   `private let scanner = FileScanner()` etc.
+   on `init`. These are not injected; tests
+   can't substitute them. Add an init
+   parameter for each (defaulting to the
+   production instance) so the existing
+   `Tests/DuckSortTests` can mock the I/O.
+
+e) `MetadataSnapshot` is a 27-field struct
+   (ExportOptions.swift:10-38). Add `Codable`
+   conformance and persist the most recent
+   scan's snapshots to a cache file keyed by
+   `(filePath, mtime)`. On a re-scan of the
+   same source folder, the user gets instant
+   metadata instead of waiting for
+   `loadMetadataAndTags` to re-read every
+   file. This is the single biggest perceived
+   performance win for "I closed and
+   reopened the app and now I have to wait
+   30 seconds again".
+
+f) `Equatable` on `PhotoSet` compares the
+   `mediaFiles` and `editPath` URLs (PhotoSet
+   .swift:158-165), so any selection change
+   on one set causes every other set to
+   appear unchanged to `EquatableView` —
+   which is correct, but the *view* still
+   re-evaluates when `selectedPhotoSets` is
+   iterated (line 386-388). Track an
+   `isSelected` version counter and skip
+   the body re-eval when it hasn't changed.
+
+──────────────────────────────────────────────────────
+14. ACCESSIBILITY / LOCALIZATION
+──────────────────────────────────────────────────────
+
+a) No `accessibilityLabel` on the photo grid
+   cells. The thumbnail image is a generic
+   `Image(systemName: "photo")` placeholder
+   that VoiceOver reads as "photo". Add a
+   `.accessibilityLabel` to the cell bound
+   to `photoSet.baseName` + `formatLabel`.
+
+b) No `accessibilityElement(children: .combine)`
+   on the tag pills. Each pill is a separate
+   accessibility element, so VoiceOver reads
+   "circle blue, Paris" for a 5-tag photo,
+   which is noisy. Combine them and read as
+   one element with the tag list.
+
+c) `localizedStandardCompare` is used for
+   sort (line 1979), which is correct for
+   diacritic-insensitive sort. But the
+   sidebar's folder name sort uses plain
+   `<` (line 2101). Make them consistent.
+
+d) The error message on a failed scan
+   (`statusMessage = "Found N photo sets…
+   Warning: M source(s) failed to load."`)
+   doesn't tell the user *which* sources
+   failed. Surface the failed paths in a
+   "View Failed Sources" sheet.
+
+──────────────────────────────────────────────────────
+15. LOGGING / DIAGNOSTICS
+──────────────────────────────────────────────────────
+
+a) `os_log` / `Logger` is not used anywhere
+   in the production code (grep finds nothing
+   under `import os.log`). When a user reports
+   "my transfer froze", there's no log to
+   inspect. Add a `Logger` in
+   `PhotoLibraryViewModel` and emit
+   `transfer.start`, `transfer.progress` (at
+   10% intervals), `transfer.complete`, and
+   `transfer.error` events.
+
+b) `assert` / `precondition` are absent from
+   the transfer services. A malformed
+   `RoutedPlan` (e.g. empty `baseDestination`)
+   will silently produce a
+   `destinationUnavailable` error at runtime.
+   Add a debug-only `precondition` to catch
+   these in development.
+
+c) `XCTest` performance tests exist in spirit
+   (`FolderIndexingTests` etc.) but none of
+   them use `measure {}` to track regressions.
+   Add a `measure` block around
+   `loadMetadataAndTags` with a 50-photo
+   fixture to get a baseline for future
+   refactors.
+
+──────────────────────────────────────────────────────
+16. MINOR BUGS / NITS
+──────────────────────────────────────────────────────
+
+a) `UserPreferences.swift:9` has a typo in the
+   header comment ("Kekeeps"). Cosmetic, but
+   it's user-facing in Xcode quick help.
+
+b) `MetadataReader.swift:50` builds the IPTC
+   date string by *string concatenation* even
+   though `kCGImagePropertyIPTCDateCreated`
+   and `kCGImagePropertyIPTCTimeCreated` are
+   always paired in the standard. Use a tuple
+   + `parseExifDate` directly.
+
+c) `FileScanner.swift:131` and 134 use the
+   `groupingKey` for both `media` and
+   `sidecars`. The grouping key is the full
+   standardized file path, which means a
+   sidecar that lives in a *different*
+   subfolder from its media will not match.
+   The intent (per the file header comment
+   "groups them by shared base name within
+   the same containing folder") is to group
+   by *folder + base name*, not absolute path.
+   Fix the grouping key to use the
+   parent-directory path + base name.
+
+d) `PhotoSet.swift:101` uses
+   `sortedFiles.min { lhs, rhs in ... }` to
+   pick the preview. This is O(n) over the
+   sorted array but with a custom comparator.
+   For RAW + HEIF + JPEG sets the comparator
+   is correct, but `.min(by:)` runs the
+   comparator O(n) times; precompute the rank
+   once per file or sort by rank first.
+
+e) `MetadataReader.swift:265` and 272 build
+   an attribute/tag regex *per call* even
+   though the keys are well-known. Pre-compile
+   a `static let` dictionary of
+   `[String: NSRegularExpression]` for the
+   30+ keys used.
+
+f) `FileNaming.swift` is read by both transfer
+   services but not opened in this review.
+   Suggest reviewing it for any
+   `replacingOccurrences` chains (the
+   common Swift string-perf anti-pattern).
+
+g) `TagPackLibrary.swift` is 360+ lines and
+   not opened in this review. Suggest the
+   same refactor pass (Codable conformance,
+   cached snapshots).
+
+h) `LargeImageLoader.preload(url:)` is called
+   in `PhotoSetCell.onHover` (line 133). The
+   name suggests it pre-decodes the large
+   image, but I didn't see its implementation.
+   Confirm it actually uses
+   `ThumbnailService.shared.thumbnail(for:
+   size: .large)` and not a full-res
+   decode — full-res preloads on hover are a
+   common cause of memory spikes on 1,500-
+   photo libraries.
+
+──────────────────────────────────────────────────────
+17. ADDITIONAL FEATURE SUGGESTIONS
+──────────────────────────────────────────────────────
+
+a) Smart Collections (saved filter presets): Let the user save the
+   current filter+sort+subfolder combination as a named Smart
+   Collection ("Best of Wedding — June 2026", "RAW-only with Flag")
+   that re-evaluates automatically as the library changes. Surface
+   them in the sidebar above/below the existing Tag categories.
+
+b) Batch Caption Apply: Select a group of photos and apply the same
+   caption / IPTC creator / copyright line to all of them in one
+   action, instead of editing one-by-one in the inspector.
+
+c) Color Label Support (Lightroom-style): 7-color labels (Red,
+   Yellow, Green, Blue, Purple, Magenta, Gray) in addition to
+   the existing Flag/Pick. Persist as `xmp:Label` in the sidecar
+   so other DAM apps read them.
+
+d) Duplicate Photo Detection: Perceptual-hash based detection of
+   near-duplicate photo sets (same scene, slightly different
+   exposure / crop). Surface as a "Possibly Duplicates" smart
+   collection so the user can cull them in one pass.
+
+e) Burst Group Detection: Auto-group photo sets taken within a
+   short time window (e.g. < 2s apart) into a Burst group with
+   one "best of" picker. Common on iPhone / mirrorless shoots.
+
+f) Auto-Advance After Rating: After the user rates a photo and
+   presses 1-5, automatically advance the focus to the next
+   photo so they can keep one hand on the number row. Add a
+   toggle in Settings for "Auto-advance after rating".
+
+g) Rating Heatmap on the Filmstrip: Show a thin colored bar
+   along the top of each filmstrip thumbnail indicating its
+   rating, so the user can scan the whole library at a glance
+   and see which shots are keepers.
+
+h) Sortable Sidebar Counts: The sidebar's tag / flag / rating
+   counts currently appear next to each filter. Let the user
+   click a count to set that as the active filter (single-click
+   = replace, cmd-click = add to selection). Standard "filter
+   chip" pattern from Finder and Mail.
+
+i) Import Progress Bar: When importing loose files or a folder
+   (drag-and-drop), show a determinate progress bar with file
+   count, not a spinner. The current `isScanning` boolean
+   drives an indeterminate ProgressView only.
+
+j) Export Profile Chooser: A "Profile" dropdown in the
+   Pre-Flight / Export screen with built-in presets ("Web —
+   sRGB JPEG q85", "Print — AdobeRGB TIFF", "Archive — copy
+   originals"). The current export rule editor is powerful but
+   expects the user to build every profile from scratch.
+
+k) Folder Watcher (FSEvents): Re-scan a source directory
+   automatically when new files are added (e.g. an SD card
+   still being copied to, or a tethering shoot). Today the
+   user has to click "Rescan" manually.
+
+l) Side-by-Side Metadata Diff: In the large viewer comparison
+   grid, highlight which EXIF fields differ between the two
+   photos (e.g. f/2.8 vs f/5.6) so the user can see what
+   actually changed between takes.
+
+m) Tag Hierarchy: Allow tags to have parent tags (e.g.
+   "Wedding > Ceremony > Vows") with drag-to-reparent in the
+   tag manager. Useful for photographers who organize
+   hundreds of tags.
+
+n) Quick Search Operators in the Search Bar: Support
+   `rating:>=3`, `tag:wedding`, `camera:sony`,
+   `date:2026-06-15..2026-06-20` syntax in addition to plain
+   text. Power-user feature, well-known from Lightroom and
+   other DAM tools.
+
+o) Trash / Soft Delete: A "Move to DuckSort Trash" action
+   that moves rejected photos to a `~/.ducksort_trash/`
+   folder with date-stamped subfolders, instead of an
+   immediate filesystem delete. A "Empty Trash" action
+   confirms and removes. Common safety net for culling
+   workflows.
+
+p) EXIF-Based Quick Filters in the Toolbar: One-click chips
+   for "RAW+JPEG pairs", "Has GPS", "Captured with lens X",
+   "Burst". Currently the user has to dig into the filter
+   popover for any of these.
+
+q) "Send to External Editor" Hotkey: Open the focused
+   photo's RAW in an external editor (Lightroom, Capture
+   One, Affinity Photo) via a configurable path in Settings.
+   Use the system's "Open With…" handler or a custom
+   command.
+
+r) AppleScript / Shortcuts Integration: Expose key actions
+   (Scan Folder, Export with Rule, Apply Tag) as Shortcuts
+   actions so the user can build automations. Also expose
+   an `x-callback-url` scheme for `ducksort://` deep links.
+
+s) Sidecar Import Wizard: A guided flow for the first time
+   the user opens a folder — show a preview of the tags
+   found in their XMP sidecars and let them pick which
+   ones to import into the active pack. Currently the
+   Settings → XMP Tags pane shows them but only after
+   the user has already scanned.
+
+t) Light/Dark Theme Picker: The app uses a fixed dark
+   theme. Add a Light / Dark / Auto setting in the
+   Appearance section of Settings.
+
+u) Customisable Toolbar: Let the user add/remove/reorder
+   toolbar items in the main window (Scan, Export, Tag,
+   Compare, Reveal). Standard macOS pattern via
+   `NSToolbarDelegate`.
+
+v) Recently Used Source Folders: A "File → Open Recent"
+   submenu with the last 10 source folders, similar to
+   every macOS app that opens files. Currently only the
+   most recent set is remembered.
+
+w) Bulk Metadata Edit: A spreadsheet-style view for
+   editing common fields (rating, pick, caption) across
+   many photos at once. Faster than clicking through the
+   inspector for each one.
+
+x) Auto-Backup of UserPreferences and Tag Packs: Copy
+   `~/Library/Preferences/com.example.DuckSort.plist` and
+   the active tag pack to a backup location on quit, so
+   the user can recover from a corrupted preferences
+   file. Optional, off by default.
+
+y) Network Source Support: `smb://` and `file://` URLs
+   in the "Add Source Folder" panel, so the user can
+   scan a NAS share directly. Today's URL parsing
+   assumes local paths.
+
+z) Print Contact Sheet: A "File → Print Contact Sheet"
+   action that lays out the current filtered set onto
+   letter / A4 pages with file names, ratings, and
+   capture date under each thumbnail. Standard
+   photographer workflow for client reviews.
+
+──────────────────────────────────────────────────────
+END OF SUGGESTIONS
+──────────────────────────────────────────────────────

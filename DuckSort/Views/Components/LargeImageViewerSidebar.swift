@@ -13,20 +13,9 @@ struct LargeImageViewerSidebar: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.s20) {
-                    // Section 0.5: Speed-Culling Mode
-                    VStack(alignment: .leading, spacing: Theme.Space.s10) {
-                        sectionHeader("SPEED-CULLING MODE")
-                        Toggle(isOn: $viewModel.speedCullingEnabled) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Auto-Advance & Haptics")
-                                    .font(Theme.Font.bodyBold)
-                                Text("Instantly advance to next photo upon rating, flagging, or tagging with trackpad haptics.")
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(Theme.Color.textSecondary)
-                            }
-                        }
-                        .toggleStyle(.checkbox)
-                    }
+                    // Auto-Advance (and its haptic / sound toggles + shortcut)
+                    // moved to Settings → Mode Switching, so it can be configured
+                    // once and stays out of the way of the inspector workflow.
 
                     Divider()
 
@@ -110,6 +99,11 @@ struct LargeImageViewerSidebar: View {
 
                     Divider()
 
+                    // Section 2.7: Auto-tag suggestions (machine learning)
+                    AutoTagSuggestionsView(viewModel: viewModel)
+
+                    Divider()
+
                     // Section 3: Advanced EXIF (toggle-gated by menu bar)
                     if preferences.showAdvancedEXIF {
                         VStack(alignment: .leading, spacing: Theme.Space.s12) {
@@ -190,7 +184,7 @@ struct LargeImageViewerSidebar: View {
                         Divider()
                     }
 
-                    // Section 4: Export Preview
+                    // Section 6: Export Preview (moved to bottom)
                     VStack(alignment: .leading, spacing: Theme.Space.s10) {
                         sectionHeader("ROUTED EXPORT PREVIEW")
 
@@ -246,11 +240,6 @@ struct LargeImageViewerSidebar: View {
                             )
                         }
                     }
-
-                    Divider()
-
-                    // Section 5: Auto-tag suggestions
-                    AutoTagSuggestionsView(viewModel: viewModel)
                 }
                 .padding(Theme.Space.s14)
             }

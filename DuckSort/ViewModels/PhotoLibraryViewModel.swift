@@ -974,8 +974,20 @@ final class PhotoLibraryViewModel: ObservableObject {
     }
 
     func triggerHapticFeedback() {
+        let prefs = UserPreferences.shared
         #if os(macOS)
-        NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
+        if prefs.autoAdvanceHapticEnabled {
+            // NSHapticFeedbackManager is a silent no-op on desktop Macs
+            // and older trackpads; the per-channel `autoAdvanceHapticEnabled`
+            // toggle protects the user from a "click that did nothing".
+            NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
+        }
+        if prefs.autoAdvanceSoundEnabled {
+            // System "Tink" is short, neutral, and built into every macOS
+            // install — no asset bundling required. Loudness respects the
+            // user's system volume / "Play sound effects" preference.
+            NSSound.beep()
+        }
         #endif
     }
 
@@ -1005,6 +1017,8 @@ final class PhotoLibraryViewModel: ObservableObject {
  
         setPick(-1, for: id)
         triggerHapticFeedback()
+
+        guard speedCullingEnabled else { return }
 
         guard !filteredPhotoSets.isEmpty else { return }
         guard let currentIndex = priorIndex else { return }

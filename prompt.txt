@@ -1,0 +1,81 @@
+# Implementation Plan: Perceptual Burst Deduplication & Best-Shot AI Selection
+
+This document outlines the architectural changes, data models, UI components, and local AI logic required to implement collapsible burst stacks and on-device "best shot" selection in DuckSort.
+
+---
+
+## 1. Core Concepts & Architecture
+
+### Burst Stacking (Deduplication)
+- **Time Threshold**: Automatically groups sequential photos captured within $T$ seconds of each other.
+- **Customizable Threshold**: Configurable in Settings (1 to 10 seconds, default: 3 seconds).
+- **Virtual Grid Representation**: Groups `PhotoSet` items into a new `BurstStack` model. The UI displays the stack as a single item with a badge indicating the count (e.g., "5 photos").
+- **Collapsible UI**: Users can double-click or click an expand button on the stack card to expand all constituent photos in the grid.
+
+### Local AI Best-Shot Evaluator
+- **Scope**: Evaluates photos *only* within a specific burst stack to find the optimal shot (sharpness, eyes open, lighting, smile), rather than scanning the whole library.
+- **Model**: Uses Apple's native **Vision Framework** (`VNImageRequestHandler`) to assess:
+  1. **Sharpness / Focus**: `VNClassifyImageRequest` / `VNDetectHorizonRequest` / Laplacian variance heuristics.
+  2. **Face Attributes**: `VNDetectFaceLandmarksRequest` for blink detection (eye open ratio) and smile recognition.
+  3. **Exposure & Contrast**: Derived from image histogram analysis.
+- **Badge recommendation**: Marks the selected best shot with an AI recommendation badge ("Best Shot").
+
+---
+
+## 2. Proposed Data Models
+
+```swift
+/// Represents a grouped stack of burst photos.
+struct BurstStack: Identifiable, Hashable, Sendable {
+    let id: UUID
+    var primaryPhoto: PhotoSet         // The current "cover" photo (defaults to best shot or first shot)
+    var photos: [PhotoSet]             // All photos in the burst stack
+    var isExpanded: Bool = false       // UI state: whether the stack is currently expanded in the grid
+    var aiBestShotID: UUID?            // The ID of the photo selected by the local AI
+    
+    var count: Int { photos.count }
+}
+```
+
+---
+
+## 3. Implementation Checklist & Workflow
+
+### Phase 1: View Model & Grouping Engine (`PhotoLibraryViewModel.swift`)
+- Add `@Published var burstStackingEnabled: Bool` (persisted in `UserPreferences`).
+- Add `@Published var burstTimeThreshold: Double` (default `3.0` seconds).
+- Add helper method `computeBurstStacks(from photos: [PhotoSet]) -> [BurstStack]` inside the view model:
+  1. Retrieve metadata capture dates for each photo.
+  2. Sort photos chronologically.
+  3. Group sequential photos where `t(i) - t(i-1) <= threshold`.
+- Update `filteredPhotoSets` mapping or grid rendering to display collapsed/expanded items.
+
+### Phase 2: Local AI Analyzer (`Utilities/AI/BestShotEvaluator.swift`)
+- Create a new utility class utilizing the macOS **Vision** framework.
+- Implement an asynchronous evaluation method:
+```swift
+func findBestShot(in photos: [PhotoSet]) async -> PhotoSet? {
+    var highestScore = -1.0
+    var best: PhotoSet?
+    
+    for photo in photos {
+        guard let url = photo.preferredPreviewURL else { continue }
+        let score = await evaluateImageQuality(at: url)
+        if score > highestScore {
+            highestScore = score
+            best = photo
+        }
+    }
+    return best
+}
+```
+
+### Phase 3: Grid UI Updates (`PhotoGridView.swift` & `PhotoCell.swift`)
+- Create a visual stack preview (layered frames for cover effect).
+- Display a count badge ("5 photos") and an AI Best Shot indicator icon.
+- Add click handlers to toggle expansion/collapsibility.
+
+### Phase 4: Settings Integration (`SettingsAutoTaggingPaneView.swift`)
+- Add a new section for **Burst Deduplication & Best-Shot Selection**.
+- Add a toggle for "Collapse Burst Stacks".
+- Add a slider or stepper for "Sequential Time Window" (1s to 10s).

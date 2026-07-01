@@ -17,8 +17,7 @@ struct FilmstripView: View {
                     LazyHStack(spacing: Theme.Space.s8) {
                         ForEach(Array(viewModel.filteredPhotoSets.enumerated()), id: \.element.id) { index, photoSet in
                             let isFocused = index == viewModel.focusedPhotoIndex
-                            let isNearFocus = viewModel.nearFocusedIds.contains(photoSet.id)
-                            let previewURL = isNearFocus ? photoSet.preferredPreviewURL : nil
+                            let previewURL = photoSet.preferredPreviewURL
 
                             FilmstripThumbnailCell(
                                 photoSet: photoSet,
@@ -41,12 +40,14 @@ struct FilmstripView: View {
                         let targetID = viewModel.filteredPhotoSets[newIndex].id
                         scrollProxy.scrollTo(targetID, anchor: .center)
                     }
+                    prefetchNeighbors(around: newIndex)
                 }
                 .onAppear {
                     if viewModel.focusedPhotoIndex >= 0 && viewModel.focusedPhotoIndex < viewModel.filteredPhotoSets.count {
                         let targetID = viewModel.filteredPhotoSets[viewModel.focusedPhotoIndex].id
                         scrollProxy.scrollTo(targetID, anchor: .center)
                     }
+                    prefetchNeighbors(around: viewModel.focusedPhotoIndex)
                 }
             }
 
@@ -64,6 +65,25 @@ struct FilmstripView: View {
         }
         .frame(height: Theme.Space.s64)
         .background(Theme.Color.footerBackground)
+    }
+
+    /// Warm the thumbnail cache for photos around the focused index so
+    /// scrubbing the filmstrip reveals fully decoded thumbs instantly
+    /// instead of waiting for each `ThumbnailView.task` to kick off.
+    private func prefetchNeighbors(around index: Int) {
+        let list = viewModel.filteredPhotoSets
+        guard !list.isEmpty else { return }
+        let window = 30
+        let start = max(0, index - window)
+        let end = min(list.count - 1, index + window)
+        guard start <= end else { return }
+        let size = Self.thumbSize
+        for i in start...end {
+            guard let url = list[i].preferredPreviewURL else { continue }
+            Task.detached(priority: .utility) {
+                _ = await ThumbnailService.shared.thumbnail(for: url, size: size)
+            }
+        }
     }
 }
 

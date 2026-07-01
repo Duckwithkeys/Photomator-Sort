@@ -122,6 +122,38 @@ struct LargeImagePane: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
+                .overlay(alignment: .topTrailing) {
+                    HStack(spacing: 8) {
+                        if let rating = photoSet.rating, rating > 0 {
+                            HStack(spacing: 3) {
+                                Text("\(rating)")
+                                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                                    .foregroundStyle(Theme.Color.textPrimary)
+                                Image(systemName: "star.fill")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(Theme.Color.textPrimary)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Theme.Color.rating, in: Capsule())
+                            .overlay(
+                                Capsule().stroke(.white.opacity(0.3), lineWidth: 1)
+                            )
+                            .shadow(color: .black.opacity(0.35), radius: 6, x: 0, y: 2)
+                        }
+
+                        if let pick = photoSet.pick, pick == 1 || pick == -1 {
+                            Image(systemName: pick == 1 ? "flag.fill" : "flag.slash.fill")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(Theme.Color.textInverse)
+                                .frame(width: 30, height: 30)
+                                .background(pick == 1 ? Theme.Color.danger : Theme.Color.warning, in: Circle())
+                                .overlay(Circle().stroke(.white.opacity(0.3), lineWidth: 1))
+                                .shadow(color: .black.opacity(0.35), radius: 6, x: 0, y: 2)
+                        }
+                    }
+                    .padding(14)
+                }
                 .overlay(alignment: .bottomTrailing) {
                     HStack(spacing: 10) {
                         Button {
