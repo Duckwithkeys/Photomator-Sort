@@ -989,10 +989,9 @@ final class PhotoLibraryViewModel: ObservableObject {
         let prefs = UserPreferences.shared
         #if os(macOS)
         if prefs.autoAdvanceHapticEnabled {
-            // NSHapticFeedbackManager is a silent no-op on desktop Macs
-            // and older trackpads; the per-channel `autoAdvanceHapticEnabled`
-            // toggle protects the user from a "click that did nothing".
-            NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
+            // .alignment registers a stronger physical click on Force Touch
+            // trackpads than .generic, ensuring it is clearly felt.
+            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
         }
         if prefs.autoAdvanceSoundEnabled {
             // System "Tink" is short, neutral, and built into every macOS
