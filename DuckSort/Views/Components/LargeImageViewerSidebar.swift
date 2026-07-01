@@ -17,8 +17,6 @@ struct LargeImageViewerSidebar: View {
                     // moved to Settings → Mode Switching, so it can be configured
                     // once and stays out of the way of the inspector workflow.
 
-                    Divider()
-
                     // Section 1: Tags
                     VStack(alignment: .leading, spacing: Theme.Space.s10) {
                         sectionHeader("ACTIVE TAGS")
