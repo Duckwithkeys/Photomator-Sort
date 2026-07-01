@@ -989,9 +989,17 @@ final class PhotoLibraryViewModel: ObservableObject {
         let prefs = UserPreferences.shared
         #if os(macOS)
         if prefs.autoAdvanceHapticEnabled {
-            // .alignment registers a stronger physical click on Force Touch
-            // trackpads than .generic, ensuring it is clearly felt.
-            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+            // Fire multiple haptic clicks in rapid succession to create
+            // a noticeably more forceful physical pulse.
+            let performer = NSHapticFeedbackManager.defaultPerformer
+            performer.perform(.levelChange, performanceTime: .now)
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
+                performer.perform(.alignment, performanceTime: .now)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+                performer.perform(.alignment, performanceTime: .now)
+            }
         }
         if prefs.autoAdvanceSoundEnabled {
             // System "Tink" is short, neutral, and built into every macOS
