@@ -61,20 +61,26 @@ struct InsightsView: View {
             Theme.Color.background.ignoresSafeArea()
 
             if report.isEmpty {
-                emptyState
+                VStack(spacing: 0) {
+                    headerBar
+                    emptyState
+                }
             } else {
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: Theme.Space.s24) {
-                        summaryPills
-                        chartsGrid
-                        topGearSection
+                VStack(spacing: 0) {
+                    headerBar
+                    
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: Theme.Space.s24) {
+                            summaryPills
+                            chartsGrid
+                            topGearSection
+                        }
+                        .padding(.horizontal, Theme.Space.s24)
+                        .padding(.bottom, Theme.Space.s24)
                     }
-                    .padding(.horizontal, Theme.Space.s24)
-                    .padding(.bottom, Theme.Space.s24)
                 }
             }
         }
-        .overlay(alignment: .top) { headerBar }
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                 animating = true
@@ -153,7 +159,6 @@ struct InsightsView: View {
                 }
             }
         }
-        .padding(.top, 72) // push below header bar
     }
 
     private func summaryPill(icon: String, value: String, label: String) -> some View {
@@ -278,7 +283,6 @@ struct InsightsView: View {
                 .font(Theme.Font.body)
                 .foregroundStyle(Theme.Color.textTertiary)
         }
-        .padding(.top, 80) // offset for header
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
