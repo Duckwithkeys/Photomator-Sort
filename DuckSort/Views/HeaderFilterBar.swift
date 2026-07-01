@@ -224,6 +224,7 @@ struct FilterPopoverContent: View {
                                     .foregroundStyle(Theme.Color.accent)
                             }
                             .menuStyle(.borderlessButton)
+                            .menuIndicator(.hidden)
                             .frame(width: 22, height: 22)
                             .help("Condition: \(viewModel.filterRatingCondition.rawValue)")
                         }
