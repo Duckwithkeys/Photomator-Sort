@@ -12,6 +12,47 @@ struct MetadataReader: Sendable {
     private static let pickAttrRegex = try! NSRegularExpression(pattern: #"\bxmpDM:pick\s*=\s*["'](-?[0-1])["']"#, options: [])
     private static let pickTagRegex = try! NSRegularExpression(pattern: #"<xmpDM:pick\b[^>]*>(-?[0-1])</xmpDM:pick>"#, options: [])
 
+    private static let keysToPrecompile = [
+        "tiff:Make", "Make", "tiff:Model", "Model",
+        "exifEX:LensModel", "exif:LensModel", "aux:Lens", "LensModel", "Lens",
+        "exif:FocalLengthIn35mmFilm", "exifEX:FocalLengthIn35mmFilm", "FocalLengthIn35mmFilm",
+        "exif:FocalLength", "FocalLength", "exif:ISOSpeedRatings",
+        "exif:RecommendedExposureIndex", "exifEX:RecommendedExposureIndex", "ISOSpeedRatings",
+        "exif:FNumber", "exif:ApertureValue", "FNumber",
+        "exif:Fired", "stEvt:action", "Fired", "exif:Flash", "Flash",
+        "tiff:ImageWidth", "exif:PixelXDimension", "ImageWidth",
+        "tiff:ImageLength", "exif:PixelYDimension", "ImageLength",
+        "exif:DateTimeOriginal", "xmp:CreateDate", "photoshop:DateCreated", "CreateDate", "DateTimeOriginal"
+    ]
+
+    private static let precompiledAttrRegexes: [String: NSRegularExpression] = {
+        var dict: [String: NSRegularExpression] = [:]
+        for key in keysToPrecompile {
+            let pattern = #"\b"# + NSRegularExpression.escapedPattern(for: key) + #"\s*=\s*["']([^"']+)["']"#
+            dict[key] = try! NSRegularExpression(pattern: pattern, options: [])
+        }
+        return dict
+    }()
+
+    private static let precompiledTagRegexes: [String: NSRegularExpression] = {
+        var dict: [String: NSRegularExpression] = [:]
+        for key in keysToPrecompile {
+            let pattern = #"<"# + NSRegularExpression.escapedPattern(for: key) + #"\b[^>]*>([^<]+)</"# + NSRegularExpression.escapedPattern(for: key) + #">"#
+            dict[key] = try! NSRegularExpression(pattern: pattern, options: [])
+        }
+        return dict
+    }()
+
+    private static let seqRegexes: [String: NSRegularExpression] = {
+        var dict: [String: NSRegularExpression] = [:]
+        let keys = ["exif:ISOSpeedRatings"]
+        for key in keys {
+            let pattern = #"<"# + NSRegularExpression.escapedPattern(for: key) + #"\b[^>]*>.*?<rdf:li[^>]*>([^<]+)</rdf:li>.*?</"# + NSRegularExpression.escapedPattern(for: key) + #">"#
+            dict[key] = try! NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators])
+        }
+        return dict
+    }()
+
     func metadata(for url: URL) -> MetadataSnapshot {
         if url.pathExtension.lowercased() == "xmp" {
             if let data = try? Data(contentsOf: url), let xmlString = String(data: data, encoding: .utf8) {
@@ -262,15 +303,13 @@ struct MetadataReader: Sendable {
         func extractValue(forKeys keys: [String]) -> String? {
             for key in keys {
                 // Check attribute: key="val" or key='val'
-                let attrPattern = #"\b"# + NSRegularExpression.escapedPattern(for: key) + #"\s*=\s*["']([^"']+)["']"#
-                if let regex = try? NSRegularExpression(pattern: attrPattern, options: []),
+                if let regex = Self.precompiledAttrRegexes[key],
                    let match = regex.firstMatch(in: xml, options: [], range: NSRange(xml.startIndex..., in: xml)),
                    let range = Range(match.range(at: 1), in: xml) {
                     return String(xml[range])
                 }
                 // Check tag: <key>val</key>
-                let tagPattern = #"<"# + NSRegularExpression.escapedPattern(for: key) + #"\b[^>]*>([^<]+)</"# + NSRegularExpression.escapedPattern(for: key) + #">"#
-                if let regex = try? NSRegularExpression(pattern: tagPattern, options: []),
+                if let regex = Self.precompiledTagRegexes[key],
                    let match = regex.firstMatch(in: xml, options: [], range: NSRange(xml.startIndex..., in: xml)),
                    let range = Range(match.range(at: 1), in: xml) {
                     return String(xml[range])
@@ -280,8 +319,7 @@ struct MetadataReader: Sendable {
         }
 
         func extractSeqValue(forKey key: String) -> String? {
-            let seqPattern = #"<"# + NSRegularExpression.escapedPattern(for: key) + #"\b[^>]*>.*?<rdf:li[^>]*>([^<]+)</rdf:li>.*?</"# + NSRegularExpression.escapedPattern(for: key) + #">"#
-            if let regex = try? NSRegularExpression(pattern: seqPattern, options: [.dotMatchesLineSeparators]),
+            if let regex = Self.seqRegexes[key],
                let match = regex.firstMatch(in: xml, options: [], range: NSRange(xml.startIndex..., in: xml)),
                let range = Range(match.range(at: 1), in: xml) {
                 return String(xml[range])

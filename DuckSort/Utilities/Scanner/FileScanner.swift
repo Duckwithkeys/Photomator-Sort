@@ -289,7 +289,9 @@ struct FileScanner: Sendable {
     }
 
     private static func groupingKey(for url: URL) -> String {
-        url.deletingPathExtension().standardizedFileURL.path
+        let parent = url.deletingLastPathComponent().standardizedFileURL.path
+        let baseName = url.deletingPathExtension().lastPathComponent
+        return parent + "/" + baseName
     }
 
     private static func displayBaseName(for groupingKey: String) -> String {

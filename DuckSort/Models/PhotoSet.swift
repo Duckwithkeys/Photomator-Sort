@@ -98,9 +98,10 @@ struct PhotoSet: Identifiable, Hashable, Sendable {
         self.displayName = baseName.replacingOccurrences(of: "_", with: " ")
                                    .replacingOccurrences(of: "-", with: " ")
 
-        self.preferredPreviewURL = sortedFiles.min { lhs, rhs in
-            Self.previewRank(for: lhs) < Self.previewRank(for: rhs)
-        }
+        self.preferredPreviewURL = sortedFiles
+            .map { (url: $0, rank: Self.previewRank(for: $0)) }
+            .min(by: { $0.rank < $1.rank })?
+            .url
 
         let extensions = Set(sortedFiles.map { $0.pathExtension.lowercased() })
         var hasRaw = false

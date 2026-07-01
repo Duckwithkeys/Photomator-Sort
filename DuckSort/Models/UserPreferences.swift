@@ -2,7 +2,7 @@
 //  UserPreferences.swift
 //  PhotomatorSort
 //
-//  Kekeeps last-used source/destination folders and filter rule across launches.
+//  Keeps last-used source/destination folders and filter rule across launches.
 //
 
 import Foundation
